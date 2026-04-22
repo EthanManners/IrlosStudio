@@ -31,6 +31,9 @@
 !COPYING
 !INSTALL
 !README.rst
+!IRLOS_STRIP_PLAN.md
+!PHASE_4_WEBSOCKET_VERIFY.md
+!PHASE_6_REPORT.md
 
 # Exclude lock files
 *.lock.json
