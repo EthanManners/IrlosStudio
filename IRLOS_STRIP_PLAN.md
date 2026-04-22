@@ -150,13 +150,13 @@ All verdicts are for Phase 2 unless noted "Phase 3".
 | `update/models/whatsnew.hpp` | What's New model |
 
 #### Windows updater binary (`UI/win-update/` — entire directory)
-| File | Reason |
-|------|--------|
+| File                             | Reason                                 |
+| -------------------------------- | -------------------------------------- |
 | `win-update/updater/updater.cpp` | Windows-only standalone updater binary |
-| `win-update/updater/patch.cpp` | Binary patcher |
-| `win-update/updater/helpers.cpp` | Updater helpers |
-| `win-update/updater/hash.cpp` | Hash verification |
-| `win-update/updater/http.cpp` | HTTP download |
+| `win-update/updater/patch.cpp`   | Binary patcher                         |
+| `win-update/updater/helpers.cpp` | Updater helpers                        |
+| `win-update/updater/hash.cpp`    | Hash verification                      |
+| `win-update/updater/http.cpp`    | HTTP download                          |
 
 #### Projector
 | File | Reason |
@@ -192,12 +192,12 @@ All verdicts are for Phase 2 unless noted "Phase 3".
 #### Auth / OAuth (all platforms)
 | File | Reason |
 |------|--------|
-| `auth-base.cpp/.hpp` | Base OAuth class |
-| `auth-oauth.cpp/.hpp` | OAuth2 flow |
-| `auth-listener.cpp/.hpp` | OAuth callback listener |
-| `auth-twitch.cpp/.hpp` | **See UNSURE note** — STRIP OAuth half, Twitch dock half needs decision |
-| `auth-restream.cpp/.hpp` | Restream auth |
-| `auth-youtube.cpp/.hpp` | YouTube auth |
+| `auth-base.cpp/.hpp` | Base OAuth class — **KEEP** (Twitch auth kept) |
+| `auth-oauth.cpp/.hpp` | OAuth2 flow — **KEEP** (Twitch auth kept) |
+| `auth-listener.cpp/.hpp` | OAuth callback listener — **KEEP** (Twitch auth kept) |
+| `auth-twitch.cpp/.hpp` | Twitch OAuth + dock creation — **KEEP** (decision: keep full auth flow) |
+| `auth-restream.cpp/.hpp` | Restream auth — STRIP (Restream not used) |
+| `auth-youtube.cpp/.hpp` | YouTube auth — STRIP (YouTube stripped) |
 
 #### Hotkey editor
 | File | Reason |
@@ -243,16 +243,16 @@ All verdicts are for Phase 2 unless noted "Phase 3".
 
 ---
 
-### UNSURE — Needs decision before Phase 2
+### RESOLVED — Previously UNSURE
 
-| File | Issue |
-|------|-------|
-| `window-extra-browsers.cpp/.hpp` | "Extra Browser Docks" dialog — lets users add custom browser docks at runtime. Phase 2 plan says remove the management UI for arbitrary docks. **Decision needed**: strip the dialog, or keep it for adding ad-hoc chat overlay URLs? Lean STRIP (fixed dock set). |
-| `window-basic-about.cpp/.hpp` | About dialog. Phase 5 rebrand plan implies keeping and modifying it. KEEP for now, rebrand in Phase 5. |
-| `multiview.cpp/.hpp` | Multiview (multiple-scene mosaic preview). Not mentioned in strip plan. KEEP for now; revisit if it pulls in projector code. |
-| `auth-twitch.cpp/.hpp` | **Critical coupling**: Twitch OAuth auth AND Twitch chat/dashboard/stats/feed docks are both in this file. Phase 2 says keep Twitch docks, strip stream-key / auth UI. Cannot split cleanly without code surgery. **See Section 6 for full analysis.** |
-| `window-dock-browser.cpp/.hpp` / `window-extra-browsers.cpp/.hpp` | `window-extra-browsers` uses `BrowserDock` — if we strip extra-browsers, `window-dock-browser` still needed for Twitch docks. Verdict: keep `window-dock-browser`, strip `window-extra-browsers` dialog. |
-| `screenshot-obj.hpp` / `window-basic-main-screenshot.cpp` | Screenshot-to-file. Harmless, used by context menu. KEEP. |
+| File | Decision |
+|------|----------|
+| `window-extra-browsers.cpp/.hpp` | **KEEP** — useful for adding ad-hoc chat overlay URLs via VNC without a rebuild. |
+| `window-basic-about.cpp/.hpp` | **KEEP** — rebrand in Phase 5. |
+| `multiview.cpp/.hpp` | **KEEP** — revisit if it pulls in projector code during Phase 2 build. |
+| `auth-twitch.cpp/.hpp` | **KEEP** — full OAuth flow and Twitch docks kept as-is. |
+| `window-dock-browser.cpp/.hpp` | **KEEP** — BrowserDock base needed by Twitch docks and extra browsers. |
+| `screenshot-obj.hpp` / `window-basic-main-screenshot.cpp` | **KEEP** — harmless, context-menu accessible. |
 
 ---
 
@@ -354,11 +354,11 @@ Hardcode the Yami theme in `obs-app-theming.cpp` to skip the theme selector.
 | obs-nvenc | `plugins/obs-nvenc/` | NVIDIA NVENC H.264/HEVC/AV1 via native API | **KEEP** (GPU encoding on server) |
 | obs-qsv11 | `plugins/obs-qsv11/` | Intel Quick Sync encoder | **KEEP** (conditional, server may have Intel iGPU) |
 | obs-libfdk | `plugins/obs-libfdk/` | FDK-AAC encoder (better quality than ffmpeg AAC) | **KEEP** |
-| nv-filters | `plugins/nv-filters/` | NVIDIA AI noise suppression, background blur | **UNSURE** (useful if server has GPU; adds CUDA dep) |
-| obs-webrtc | `plugins/obs-webrtc/` | WHIP WebRTC output | **UNSURE** (Phase 3: keep if WHIP is desired, strip otherwise) |
-| linux-pulseaudio | `plugins/linux-pulseaudio/` | PulseAudio mic and desktop audio capture | **KEEP** |
-| linux-alsa | `plugins/linux-alsa/` | ALSA audio capture | **UNSURE** (may be needed as PulseAudio fallback on Ubuntu) |
-| linux-pipewire | `plugins/linux-pipewire/` | PipeWire screen/camera/audio capture | **STRIP** (screen/camera capture not needed; PipeWire audio is UNSURE — Ubuntu 22.04 uses PulseAudio) |
+| nv-filters | `plugins/nv-filters/` | NVIDIA AI noise suppression, background blur | **KEEP** (all servers have a GPU) |
+| obs-webrtc | `plugins/obs-webrtc/` | WHIP WebRTC output | **KEEP** |
+| linux-pulseaudio | `plugins/linux-pulseaudio/` | PulseAudio mic and desktop audio capture | **STRIP** (no physical audio capture — audio arrives embedded in SRT/RTMP; browser_source audio handled by CEF) |
+| linux-alsa | `plugins/linux-alsa/` | ALSA audio capture | **STRIP** (same reason) |
+| linux-pipewire | `plugins/linux-pipewire/` | PipeWire screen/camera/audio capture | **STRIP** (same reason; no screen/camera capture either) |
 | linux-jack | `plugins/linux-jack/` | JACK audio | **STRIP** (pro audio rig not applicable) |
 | linux-v4l2 | `plugins/linux-v4l2/` | Video4Linux2 webcam capture + v4l2loopback virtual camera | **STRIP** |
 | linux-capture | `plugins/linux-capture/` | X11/XComposite/XShm screen capture | **STRIP** (headless server) |
@@ -396,9 +396,9 @@ Grepped `obs_register_source` and `obs_source_info` across all `.c`/`.cpp` files
 | `text_ft2_source` | `plugins/text-freetype2/text-freetype2.c` | Text overlays on Linux |
 | `scene` | `libobs/obs-scene.c` | Nested scenes (registered by libobs, never touch) |
 | `group` | `libobs/obs-scene.c` | Source grouping (registered by libobs) |
-| `pulse_input_capture` | `plugins/linux-pulseaudio/pulse-input.c` | Microphone input |
-| `pulse_output_capture` | `plugins/linux-pulseaudio/pulse-input.c` | Desktop audio monitor |
 | `color_source` (v1/v2/v3) | `plugins/image-source/color-source.c` | Solid color backgrounds |
+| `nv_background_blur_filter` | `plugins/nv-filters/` | NVIDIA AI background blur (GPU required — server has GPU) |
+| `nvidia_audiofx_filter` | `plugins/nv-filters/` | NVIDIA AI audio noise suppression |
 
 ### STRIP (removed with their plugins)
 
@@ -415,6 +415,8 @@ Grepped `obs_register_source` and `obs_source_info` across all `.c`/`.cpp` files
 | `pipewire-camera-source` | `plugins/linux-pipewire/` | PipeWire camera |
 | `v4l2_input` | `plugins/linux-v4l2/` | V4L2 webcam |
 | `virtualcam_output` | `plugins/linux-v4l2/` | V4L2 virtual camera output |
+| `pulse_input_capture` | `plugins/linux-pulseaudio/` | No physical audio capture on server |
+| `pulse_output_capture` | `plugins/linux-pulseaudio/` | No physical audio capture on server |
 | `alsa_input_capture` | `plugins/linux-alsa/` | ALSA audio |
 | `jack_output_capture` | `plugins/linux-jack/` | JACK audio |
 | `oss_input_capture` | `plugins/oss-audio/` | OSS audio |
@@ -433,8 +435,6 @@ Grepped `obs_register_source` and `obs_source_info` across all `.c`/`.cpp` files
 | `vlc_source` | `plugins/vlc-video/` | VLC media source |
 | `text_gdiplus` / `text_gdiplus_v2` | `plugins/obs-text/` | Windows GDI+ text |
 | `vst_filter` | `plugins/obs-vst/` | VST plugin |
-| `nv_background_blur_filter` | `plugins/nv-filters/` | NVIDIA AI filter |
-| `nvidia_audiofx_filter` | `plugins/nv-filters/` | NVIDIA audio filter |
 
 ### Transitions (registered by obs-transitions — KEEP plugin, KEEP all)
 
@@ -615,44 +615,20 @@ If IrlosStudio is ever launched with `--safe-mode`, obs-websocket will be disabl
 
 ---
 
-## 7. Outstanding Questions / Flags for Review
+## 7. Pre-Phase-2 Decisions — RESOLVED
 
-Before Phase 2 begins, confirm the following:
+All questions answered. Phase 2 may proceed.
 
-### Q1 — Twitch docks: keep via auth flow, or add as fixed browser docks?
-
-`auth-twitch.cpp` contains both:
-1. Twitch OAuth flow (should be STRIP — irlosd manages service config)
-2. Four browser docks created after OAuth: `twitchChat`, `twitchInfo`, `twitchStats`, `twitchFeed`
-
-Options:
-- **Option A (Recommended):** Strip `auth-twitch.cpp` entirely. Add the four Twitch browser docks as hardcoded `BrowserDock` instances with fixed Twitch URLs in `window-basic-main-browser.cpp`. No OAuth, no auth dependency — docks just open the Twitch chat/dashboard pages directly (they work without login in browser context).
-- **Option B:** Keep `auth-twitch.cpp` but gut the OAuth UI, leaving only dock creation. More surgical but messier.
-
-### Q2 — `window-extra-browsers`: strip or keep?
-
-This is the "Manage Extra Browser Docks" dialog that lets users add arbitrary browser dock URLs at runtime. Stripping it removes the ability to add ad-hoc chat overlays without rebuilding. Since the plan specifies a fixed dock set, recommend STRIP.
-
-### Q3 — linux-alsa and linux-pipewire audio backends
-
-Ubuntu 22.04 uses PulseAudio by default (PipeWire-pulse is used on newer Ubuntu). The appliance is Ubuntu 22.04.
-- `linux-pulseaudio` — KEEP (primary audio backend).
-- `linux-alsa` — STRIP (PulseAudio covers it).
-- `linux-pipewire` — STRIP the screen/camera capture sources. The `pipewire_audio_capture` source in `linux-pipewire` is separate from screen capture — verify at Phase 3 whether the appliance image will run PipeWire-pulse before stripping.
-
-### Q4 — `nv-filters` plugin
-
-Keeps NVIDIA AI noise suppression and background blur. Adds CUDA / TensorRT dependency. If the appliance server has an NVIDIA GPU for encoding, this is "free". Recommend KEEP but confirm hardware target.
-
-### Q5 — `obs-webrtc` (WHIP output)
-
-WHIP is a lightweight alternative to RTMP. Some CDNs accept it. Low risk to keep. Recommend KEEP.
-
-### Q6 — Undo/redo scope
-
-`undo-stack-obs.cpp/.hpp` is wired into scene/source add/remove/rename operations. Stripping it requires removing all `undo_s.add_action(...)` call sites from `window-basic-main.cpp` and friends — several dozen sites. The complexity is manageable but confirm this is desired before Phase 2.
+| # | Question | Decision |
+|---|----------|----------|
+| Q1 | Twitch docks — keep full auth flow or add fixed browser docks? | **KEEP full `auth-twitch.cpp`** (OAuth + docks kept as-is) |
+| Q2 | `window-extra-browsers` — strip or keep? | **KEEP** (useful for adding ad-hoc chat overlays via VNC) |
+| Q3 | Audio capture plugins — keep linux-pulseaudio? | **STRIP all audio capture plugins** (linux-pulseaudio, linux-alsa, linux-pipewire, linux-jack, oss-audio, sndio) — audio arrives embedded in SRT/RTMP feed; browser_source CEF handles its own audio internally |
+| Q4 | `nv-filters` — keep? | **KEEP** (all servers have a GPU) |
+| Q5 | `obs-webrtc` (WHIP) — keep? | **KEEP** |
+| Q6 | Undo/redo — strip with call site cleanup? | **STRIP** (`undo-stack-obs.cpp/.hpp` + all `undo_s.add_action(...)` call sites removed in Phase 2) |
 
 ---
 
-*End of Phase 1 discovery. No files were modified.*
-*Commit: `irlos/phase-1-discovery`*
+*End of Phase 1 discovery. No source files were modified.*
+*Updated: decisions recorded after owner review. Ready for Phase 2.*
