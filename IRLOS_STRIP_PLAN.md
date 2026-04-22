@@ -356,10 +356,10 @@ Hardcode the Yami theme in `obs-app-theming.cpp` to skip the theme selector.
 | obs-libfdk | `plugins/obs-libfdk/` | FDK-AAC encoder (better quality than ffmpeg AAC) | **KEEP** |
 | nv-filters | `plugins/nv-filters/` | NVIDIA AI noise suppression, background blur | **KEEP** (all servers have a GPU) |
 | obs-webrtc | `plugins/obs-webrtc/` | WHIP WebRTC output | **KEEP** |
-| linux-pulseaudio | `plugins/linux-pulseaudio/` | PulseAudio mic and desktop audio capture | **STRIP** (no physical audio capture — audio arrives embedded in SRT/RTMP; browser_source audio handled by CEF) |
-| linux-alsa | `plugins/linux-alsa/` | ALSA audio capture | **STRIP** (same reason) |
-| linux-pipewire | `plugins/linux-pipewire/` | PipeWire screen/camera/audio capture | **STRIP** (same reason; no screen/camera capture either) |
-| linux-jack | `plugins/linux-jack/` | JACK audio | **STRIP** (pro audio rig not applicable) |
+| linux-pulseaudio | `plugins/linux-pulseaudio/` | PulseAudio mic and desktop audio capture | **KEEP** (retained in case) |
+| linux-alsa | `plugins/linux-alsa/` | ALSA audio capture | **KEEP** (retained in case) |
+| linux-pipewire | `plugins/linux-pipewire/` | PipeWire screen/camera/audio capture | **KEEP** (audio portion retained in case; screen/camera sources still strip in Phase 3) |
+| linux-jack | `plugins/linux-jack/` | JACK audio | **KEEP** (retained in case) |
 | linux-v4l2 | `plugins/linux-v4l2/` | Video4Linux2 webcam capture + v4l2loopback virtual camera | **STRIP** |
 | linux-capture | `plugins/linux-capture/` | X11/XComposite/XShm screen capture | **STRIP** (headless server) |
 | oss-audio | `plugins/oss-audio/` | OSS audio capture (FreeBSD) | **STRIP** |
@@ -397,7 +397,11 @@ Grepped `obs_register_source` and `obs_source_info` across all `.c`/`.cpp` files
 | `scene` | `libobs/obs-scene.c` | Nested scenes (registered by libobs, never touch) |
 | `group` | `libobs/obs-scene.c` | Source grouping (registered by libobs) |
 | `color_source` (v1/v2/v3) | `plugins/image-source/color-source.c` | Solid color backgrounds |
-| `nv_background_blur_filter` | `plugins/nv-filters/` | NVIDIA AI background blur (GPU required — server has GPU) |
+| `pulse_input_capture` | `plugins/linux-pulseaudio/` | Microphone input (retained in case) |
+| `pulse_output_capture` | `plugins/linux-pulseaudio/` | Desktop audio monitor (retained in case) |
+| `alsa_input_capture` | `plugins/linux-alsa/` | ALSA audio (retained in case) |
+| `jack_output_capture` | `plugins/linux-jack/` | JACK audio (retained in case) |
+| `nv_background_blur_filter` | `plugins/nv-filters/` | NVIDIA AI background blur |
 | `nvidia_audiofx_filter` | `plugins/nv-filters/` | NVIDIA AI audio noise suppression |
 
 ### STRIP (removed with their plugins)
@@ -415,11 +419,7 @@ Grepped `obs_register_source` and `obs_source_info` across all `.c`/`.cpp` files
 | `pipewire-camera-source` | `plugins/linux-pipewire/` | PipeWire camera |
 | `v4l2_input` | `plugins/linux-v4l2/` | V4L2 webcam |
 | `virtualcam_output` | `plugins/linux-v4l2/` | V4L2 virtual camera output |
-| `pulse_input_capture` | `plugins/linux-pulseaudio/` | No physical audio capture on server |
-| `pulse_output_capture` | `plugins/linux-pulseaudio/` | No physical audio capture on server |
-| `alsa_input_capture` | `plugins/linux-alsa/` | ALSA audio |
-| `jack_output_capture` | `plugins/linux-jack/` | JACK audio |
-| `oss_input_capture` | `plugins/oss-audio/` | OSS audio |
+| `oss_input_capture` | `plugins/oss-audio/` | OSS audio (FreeBSD-only, strip) |
 | `sndio_output_capture` | `plugins/sndio/` | sndio audio |
 | `wasapi_input_capture` | `plugins/win-wasapi/` | Windows mic |
 | `wasapi_output_capture` | `plugins/win-wasapi/` | Windows desktop audio |
@@ -623,7 +623,7 @@ All questions answered. Phase 2 may proceed.
 |---|----------|----------|
 | Q1 | Twitch docks — keep full auth flow or add fixed browser docks? | **KEEP full `auth-twitch.cpp`** (OAuth + docks kept as-is) |
 | Q2 | `window-extra-browsers` — strip or keep? | **KEEP** (useful for adding ad-hoc chat overlays via VNC) |
-| Q3 | Audio capture plugins — keep linux-pulseaudio? | **STRIP all audio capture plugins** (linux-pulseaudio, linux-alsa, linux-pipewire, linux-jack, oss-audio, sndio) — audio arrives embedded in SRT/RTMP feed; browser_source CEF handles its own audio internally |
+| Q3 | Audio capture plugins — keep linux-pulseaudio? | **KEEP all Linux audio plugins** (linux-pulseaudio, linux-alsa, linux-pipewire, linux-jack) — retained in case; oss-audio and sndio still stripped (BSD-only) |
 | Q4 | `nv-filters` — keep? | **KEEP** (all servers have a GPU) |
 | Q5 | `obs-webrtc` (WHIP) — keep? | **KEEP** |
 | Q6 | Undo/redo — strip with call site cleanup? | **STRIP** (`undo-stack-obs.cpp/.hpp` + all `undo_s.add_action(...)` call sites removed in Phase 2) |
