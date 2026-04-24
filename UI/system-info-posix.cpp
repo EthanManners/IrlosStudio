@@ -2,5 +2,5 @@
 
 void system_info(GoLiveApi::Capabilities &capabilities)
 {
-	UNUSED_PARAMETER(capabilities);
+	(void)capabilities;
 }

@@ -1,7 +1,7 @@
 find_package(Qt6 REQUIRED Widgets Network Svg Xml)
 
 if(OS_LINUX OR OS_FREEBSD OR OS_OPENBSD)
-  find_package(Qt6 REQUIRED Gui DBus)
+  find_package(Qt6 REQUIRED Gui GuiPrivate DBus)
 endif()
 
 if(NOT TARGET OBS::qt-wrappers)
@@ -22,12 +22,6 @@ set_property(TARGET obs-studio APPEND PROPERTY AUTOUIC_SEARCH_PATHS forms forms/
 
 set(
   _qt_sources
-  forms/AutoConfigFinishPage.ui
-  forms/AutoConfigStartPage.ui
-  forms/AutoConfigStartPage.ui
-  forms/AutoConfigStreamPage.ui
-  forms/AutoConfigTestPage.ui
-  forms/AutoConfigVideoPage.ui
   forms/ColorSelect.ui
   forms/obs.qrc
   forms/OBSAbout.ui
@@ -37,18 +31,11 @@ set(
   forms/OBSBasicFilters.ui
   forms/OBSBasicInteraction.ui
   forms/OBSBasicProperties.ui
-  forms/OBSBasicSettings.ui
   forms/OBSBasicSourceSelect.ui
   forms/OBSBasicTransform.ui
-  forms/OBSBasicVCamConfig.ui
   forms/OBSExtraBrowsers.ui
-  forms/OBSImporter.ui
-  forms/OBSLogReply.ui
   forms/OBSLogViewer.ui
   forms/OBSMissingFiles.ui
-  forms/OBSRemux.ui
-  forms/OBSUpdate.ui
-  forms/OBSYoutubeActions.ui
   forms/source-toolbar/browser-source-toolbar.ui
   forms/source-toolbar/color-source-toolbar.ui
   forms/source-toolbar/device-select-toolbar.ui

@@ -656,9 +656,6 @@ void OBSBasicPreview::mousePressEvent(QMouseEvent *event)
 	vec2_zero(&lastMoveOffset);
 
 	mousePos = startPos;
-	wrapper =
-		obs_scene_save_transform_states(main->GetCurrentScene(), true);
-	changed = false;
 }
 
 void OBSBasicPreview::UpdateCursor(uint32_t &flags)
@@ -835,33 +832,6 @@ void OBSBasicPreview::mouseReleaseEvent(QMouseEvent *event)
 		hoveredPreviewItems.push_back(item);
 		selectedItems.clear();
 	}
-	OBSBasic *main = reinterpret_cast<OBSBasic *>(App()->GetMainWindow());
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(main->GetCurrentScene(), true);
-
-	auto undo_redo = [](const std::string &data) {
-		OBSDataAutoRelease dat =
-			obs_data_create_from_json(data.c_str());
-		OBSSourceAutoRelease source = obs_get_source_by_uuid(
-			obs_data_get_string(dat, "scene_uuid"));
-		reinterpret_cast<OBSBasic *>(App()->GetMainWindow())
-			->SetCurrentScene(source.Get(), true);
-
-		obs_scene_load_transform_states(data.c_str());
-	};
-
-	if (wrapper && rwrapper) {
-		std::string undo_data(obs_data_get_json(wrapper));
-		std::string redo_data(obs_data_get_json(rwrapper));
-		if (changed && undo_data.compare(redo_data) != 0)
-			main->undo_s.add_action(
-				QTStr("Undo.Transform")
-					.arg(obs_source_get_name(
-						main->GetCurrentSceneSource())),
-				undo_redo, undo_redo, undo_data, redo_data);
-	}
-
-	wrapper = nullptr;
 }
 
 struct SelectedItemBounds {
@@ -1653,7 +1623,6 @@ void OBSBasicPreview::RotateItem(const vec2 &pos)
 void OBSBasicPreview::mouseMoveEvent(QMouseEvent *event)
 {
 	OBSBasic *main = reinterpret_cast<OBSBasic *>(App()->GetMainWindow());
-	changed = true;
 
 	QPointF qtPos = event->position();
 

@@ -4,7 +4,7 @@
 #include <memory>
 #include <string>
 
-#include "multitrack-video-output.hpp"
+constexpr const char *VIRTUAL_CAM_ID = "virtualcam_output";
 
 class OBSBasic;
 
@@ -22,15 +22,9 @@ struct BasicOutputHandler {
 	bool virtualCamActive = false;
 	OBSBasic *main;
 
-	std::unique_ptr<MultitrackVideoOutput> multitrackVideo;
-	bool multitrackVideoActive = false;
-
 	OBSOutputAutoRelease StreamingOutput() const
 	{
-		return (multitrackVideo && multitrackVideoActive)
-			       ? multitrackVideo->StreamingOutput()
-			       : OBSOutputAutoRelease{
-					 obs_output_get_ref(streamOutput)};
+		return OBSOutputAutoRelease{obs_output_get_ref(streamOutput)};
 	}
 
 	obs_view_t *virtualCamView = nullptr;
@@ -89,8 +83,7 @@ struct BasicOutputHandler {
 	inline bool Active() const
 	{
 		return streamingActive || recordingActive || delayActive ||
-		       replayBufferActive || virtualCamActive ||
-		       multitrackVideoActive;
+		       replayBufferActive || virtualCamActive;
 	}
 
 protected:
@@ -100,11 +93,6 @@ protected:
 					 bool overwrite, const char *format,
 					 bool ffmpeg);
 
-	std::shared_future<void> SetupMultitrackVideo(
-		obs_service_t *service, std::string audio_encoder_id,
-		size_t main_audio_mixer, std::optional<size_t> vod_track_mixer,
-		std::function<void(std::optional<bool>)> continuation);
-	OBSDataAutoRelease GenerateMultitrackVideoStreamDumpConfig();
 };
 
 BasicOutputHandler *CreateSimpleOutputHandler(OBSBasic *main);

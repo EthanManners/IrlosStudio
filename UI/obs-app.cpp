@@ -49,8 +49,8 @@
 #ifdef __APPLE__
 #include "window-permissions.hpp"
 #endif
-#include "window-basic-settings.hpp"
 #include "platform.hpp"
+#include "multiview.hpp"
 
 #include <fstream>
 

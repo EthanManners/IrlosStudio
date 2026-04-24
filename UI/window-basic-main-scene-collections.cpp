@@ -27,7 +27,6 @@
 #include <qt-wrappers.hpp>
 #include "item-widget-helpers.hpp"
 #include "window-basic-main.hpp"
-#include "window-importer.hpp"
 #include "window-namedialog.hpp"
 
 // MARK: Constant Expressions
@@ -592,10 +591,6 @@ void OBSBasic::on_actionRemoveSceneCollection_triggered(bool skipConfirmation)
 
 void OBSBasic::on_actionImportSceneCollection_triggered()
 {
-	OBSImporter imp(this);
-	imp.exec();
-
-	RefreshSceneCollections(true);
 }
 
 void OBSBasic::on_actionExportSceneCollection_triggered()

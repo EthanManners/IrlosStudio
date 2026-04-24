@@ -139,8 +139,6 @@ class SourceTree : public QListView {
 	QStaticText textNoSources;
 	QSvgRenderer iconNoSources;
 
-	OBSData undoSceneData;
-
 	bool iconsVisible = true;
 
 	void UpdateNoSourcesMessage();

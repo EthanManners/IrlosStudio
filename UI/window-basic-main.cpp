@@ -49,25 +49,11 @@
 #include "visibility-item-widget.hpp"
 #include "item-widget-helpers.hpp"
 #include "basic-controls.hpp"
-#include "window-basic-settings.hpp"
 #include "window-namedialog.hpp"
-#include "window-basic-auto-config.hpp"
 #include "window-basic-source-select.hpp"
 #include "window-basic-main.hpp"
 #include "window-basic-stats.hpp"
 #include "window-basic-main-outputs.hpp"
-#include "window-basic-vcam-config.hpp"
-#include "window-log-reply.hpp"
-#ifdef __APPLE__
-#include "window-permissions.hpp"
-#endif
-#include "window-projector.hpp"
-#include "window-remux.hpp"
-#ifdef YOUTUBE_ENABLED
-#include "auth-youtube.hpp"
-#include "window-youtube-actions.hpp"
-#include "youtube-api-wrappers.hpp"
-#endif
 #include "context-bar-controls.hpp"
 #include "obs-proxy-style.hpp"
 #include "display-helpers.hpp"
@@ -75,7 +61,6 @@
 #include "remote-text.hpp"
 #include "ui-validation.hpp"
 #include "media-controls.hpp"
-#include "undo-stack-obs.hpp"
 #include <fstream>
 #include <sstream>
 
@@ -312,7 +297,6 @@ extern void RegisterYoutubeAuth();
 
 OBSBasic::OBSBasic(QWidget *parent)
 	: OBSMainWindow(parent),
-	  undo_s(ui),
 	  ui(new Ui::OBSBasic)
 {
 	setAttribute(Qt::WA_NativeWindow);
@@ -395,9 +379,6 @@ OBSBasic::OBSBasic(QWidget *parent)
 	connect(controls, &OBSBasicControls::ForceStopStreamMenuActionClicked,
 		this, &OBSBasic::ForceStopStreaming);
 
-	connect(controls, &OBSBasicControls::BroadcastButtonClicked, this,
-		&OBSBasic::BroadcastButtonClicked);
-
 	connect(controls, &OBSBasicControls::RecordButtonClicked, this,
 		&OBSBasic::RecordActionTriggered);
 	connect(controls, &OBSBasicControls::PauseRecordButtonClicked, this,
@@ -415,9 +396,6 @@ OBSBasic::OBSBasic(QWidget *parent)
 
 	connect(controls, &OBSBasicControls::StudioModeButtonClicked, this,
 		&OBSBasic::TogglePreviewProgramMode);
-
-	connect(controls, &OBSBasicControls::SettingsButtonClicked, this,
-		&OBSBasic::on_action_Settings_triggered);
 
 	connect(controls, &OBSBasicControls::ExitButtonClicked, this,
 		&QMainWindow::close);
@@ -443,8 +421,6 @@ OBSBasic::OBSBasic(QWidget *parent)
 	qRegisterMetaType<OBSSceneItem>("OBSSceneItem");
 	qRegisterMetaType<OBSSource>("OBSSource");
 	qRegisterMetaType<obs_hotkey_id>("obs_hotkey_id");
-	qRegisterMetaType<SavedProjectorInfo *>("SavedProjectorInfo *");
-
 	ui->scenes->setAttribute(Qt::WA_MacShowFocusRect, false);
 	ui->sources->setAttribute(Qt::WA_MacShowFocusRect, false);
 
@@ -644,7 +620,7 @@ OBSBasic::OBSBasic(QWidget *parent)
 		&OBSBasic::TogglePreview);
 
 	connect(ui->scenes, &SceneTree::scenesReordered,
-		[]() { OBSProjector::UpdateMultiviewProjectors(); });
+		[]() {});
 
 	connect(App(), &OBSApp::StyleChanged, this,
 		[this]() { OnEvent(OBS_FRONTEND_EVENT_THEME_CHANGED); });
@@ -848,51 +824,6 @@ obs_data_array_t *OBSBasic::SaveSceneListOrder()
 	return sceneOrder;
 }
 
-obs_data_array_t *OBSBasic::SaveProjectors()
-{
-	obs_data_array_t *savedProjectors = obs_data_array_create();
-
-	auto saveProjector = [savedProjectors](OBSProjector *projector) {
-		if (!projector)
-			return;
-
-		OBSDataAutoRelease data = obs_data_create();
-		ProjectorType type = projector->GetProjectorType();
-
-		switch (type) {
-		case ProjectorType::Scene:
-		case ProjectorType::Source: {
-			OBSSource source = projector->GetSource();
-			const char *name = obs_source_get_name(source);
-			obs_data_set_string(data, "name", name);
-			break;
-		}
-		default:
-			break;
-		}
-
-		obs_data_set_int(data, "monitor", projector->GetMonitor());
-		obs_data_set_int(data, "type", static_cast<int>(type));
-		obs_data_set_string(
-			data, "geometry",
-			projector->saveGeometry().toBase64().constData());
-
-		if (projector->IsAlwaysOnTopOverridden())
-			obs_data_set_bool(data, "alwaysOnTop",
-					  projector->IsAlwaysOnTop());
-
-		obs_data_set_bool(data, "alwaysOnTopOverridden",
-				  projector->IsAlwaysOnTopOverridden());
-
-		obs_data_array_push_back(savedProjectors, data);
-	};
-
-	for (size_t i = 0; i < projectors.size(); i++)
-		saveProjector(static_cast<OBSProjector *>(projectors[i]));
-
-	return savedProjectors;
-}
-
 void OBSBasic::Save(const char *file)
 {
 	OBSScene scene = GetCurrentScene();
@@ -903,10 +834,9 @@ void OBSBasic::Save(const char *file)
 	OBSDataArrayAutoRelease sceneOrder = SaveSceneListOrder();
 	OBSDataArrayAutoRelease transitions = SaveTransitions();
 	OBSDataArrayAutoRelease quickTrData = SaveQuickTransitions();
-	OBSDataArrayAutoRelease savedProjectorList = SaveProjectors();
 	OBSDataAutoRelease saveData = GenerateSaveData(
 		sceneOrder, quickTrData, ui->transitionDuration->value(),
-		transitions, scene, curProgramScene, savedProjectorList);
+		transitions, scene, curProgramScene, nullptr);
 
 	obs_data_set_bool(saveData, "preview_locked", ui->preview->Locked());
 	obs_data_set_bool(saveData, "scaling_enabled",
@@ -918,27 +848,7 @@ void OBSBasic::Save(const char *file)
 	obs_data_set_double(saveData, "scaling_off_y",
 			    ui->preview->GetScrollY());
 
-	if (vcamEnabled) {
-		OBSDataAutoRelease obj = obs_data_create();
 
-		obs_data_set_int(obj, "type2", (int)vcamConfig.type);
-		switch (vcamConfig.type) {
-		case VCamOutputType::Invalid:
-		case VCamOutputType::ProgramView:
-		case VCamOutputType::PreviewOutput:
-			break;
-		case VCamOutputType::SceneOutput:
-			obs_data_set_string(obj, "scene",
-					    vcamConfig.scene.c_str());
-			break;
-		case VCamOutputType::SourceOutput:
-			obs_data_set_string(obj, "source",
-					    vcamConfig.source.c_str());
-			break;
-		}
-
-		obs_data_set_obj(saveData, "virtual-camera", obj);
-	}
 
 	if (api) {
 		if (!collectionModuleData)
@@ -1108,33 +1018,6 @@ void OBSBasic::LoadSceneListOrder(obs_data_array_t *array)
 		const char *name = obs_data_get_string(data, "name");
 
 		ReorderItemByName(ui->scenes, name, (int)i);
-	}
-}
-
-void OBSBasic::LoadSavedProjectors(obs_data_array_t *array)
-{
-	for (SavedProjectorInfo *info : savedProjectorsArray) {
-		delete info;
-	}
-	savedProjectorsArray.clear();
-
-	size_t num = obs_data_array_count(array);
-
-	for (size_t i = 0; i < num; i++) {
-		OBSDataAutoRelease data = obs_data_array_item(array, i);
-
-		SavedProjectorInfo *info = new SavedProjectorInfo();
-		info->monitor = obs_data_get_int(data, "monitor");
-		info->type = static_cast<ProjectorType>(
-			obs_data_get_int(data, "type"));
-		info->geometry =
-			std::string(obs_data_get_string(data, "geometry"));
-		info->name = std::string(obs_data_get_string(data, "name"));
-		info->alwaysOnTop = obs_data_get_bool(data, "alwaysOnTop");
-		info->alwaysOnTopOverridden =
-			obs_data_get_bool(data, "alwaysOnTopOverridden");
-
-		savedProjectorsArray.emplace_back(info);
 	}
 }
 
@@ -1477,20 +1360,6 @@ retryScene:
 
 	/* ------------------- */
 
-	bool projectorSave = config_get_bool(App()->GetUserConfig(),
-					     "BasicWindow", "SaveProjectors");
-
-	if (projectorSave) {
-		OBSDataArrayAutoRelease savedProjectors =
-			obs_data_get_array(data, "saved_projectors");
-
-		if (savedProjectors) {
-			LoadSavedProjectors(savedProjectors);
-			OpenSavedProjectors();
-			activateWindow();
-		}
-	}
-
 	/* ------------------- */
 
 	std::string file_base = strrchr(file, '/') + 1;
@@ -1526,33 +1395,6 @@ retryScene:
 
 	emit ui->preview->DisplayResized();
 
-	if (vcamEnabled) {
-		OBSDataAutoRelease obj =
-			obs_data_get_obj(data, "virtual-camera");
-
-		vcamConfig.type =
-			(VCamOutputType)obs_data_get_int(obj, "type2");
-		if (vcamConfig.type == VCamOutputType::Invalid)
-			vcamConfig.type =
-				(VCamOutputType)obs_data_get_int(obj, "type");
-
-		if (vcamConfig.type == VCamOutputType::Invalid) {
-			VCamInternalType internal =
-				(VCamInternalType)obs_data_get_int(obj,
-								   "internal");
-
-			switch (internal) {
-			case VCamInternalType::Default:
-				vcamConfig.type = VCamOutputType::ProgramView;
-				break;
-			case VCamInternalType::Preview:
-				vcamConfig.type = VCamOutputType::PreviewOutput;
-				break;
-			}
-		}
-		vcamConfig.scene = obs_data_get_string(obj, "scene");
-		vcamConfig.source = obs_data_get_string(obj, "source");
-	}
 
 	if (obs_data_has_user_value(data, "resolution")) {
 		OBSDataAutoRelease res = obs_data_get_obj(data, "resolution");
@@ -2095,8 +1937,6 @@ bool OBSBasic::InitBasicConfigDefaults()
 				48000);
 	config_set_default_string(activeConfiguration, "Audio", "ChannelSetup",
 				  "Stereo");
-	config_set_default_double(activeConfiguration, "Audio",
-				  "MeterDecayRate", VOLUME_METER_DECAY_FAST);
 	config_set_default_uint(activeConfiguration, "Audio", "PeakMeterType",
 				0);
 
@@ -2105,7 +1945,17 @@ bool OBSBasic::InitBasicConfigDefaults()
 	return true;
 }
 
-extern bool EncoderAvailable(const char *encoder);
+bool EncoderAvailable(const char *encoder)
+{
+	const char *val;
+	int i = 0;
+
+	while (obs_enum_encoder_types(i++, &val))
+		if (strcmp(val, encoder) == 0)
+			return true;
+
+	return false;
+}
 
 void OBSBasic::InitBasicConfigDefaults2()
 {
@@ -2272,10 +2122,6 @@ void OBSBasic::ResetOutputs()
 					   : CreateSimpleOutputHandler(this));
 
 		emit ReplayBufEnabled(outputHandler->replayBuffer);
-
-		if (sysTrayReplayBuffer)
-			sysTrayReplayBuffer->setEnabled(
-				!!outputHandler->replayBuffer);
 
 		UpdateIsRecordingPausable();
 	} else {
@@ -2661,8 +2507,6 @@ void OBSBasic::OBSInit()
 		config_save_safe(App()->GetUserConfig(), "tmp", nullptr);
 	}
 #endif
-	TimedCheckForUpdates();
-
 	ToggleMixerLayout(config_get_bool(App()->GetUserConfig(), "BasicWindow",
 					  "VerticalVolControl"));
 
@@ -2676,11 +2520,6 @@ void OBSBasic::OBSInit()
 	/* Add multiview menu      */
 
 	ui->viewMenu->addSeparator();
-
-	AddProjectorMenuMonitors(ui->multiviewProjectorMenu, this,
-				 &OBSBasic::OpenMultiviewProjector);
-	connect(ui->viewMenu->menuAction(), &QAction::hovered, this,
-		&OBSBasic::UpdateMultiviewProjectorMenu);
 
 	ui->sources->UpdateIcons();
 
@@ -2707,15 +2546,6 @@ void OBSBasic::OBSInit()
 	/* Don't show menu to raise macOS-only permissions dialog */
 	delete ui->actionShowMacPermissions;
 	ui->actionShowMacPermissions = nullptr;
-#endif
-
-#if defined(_WIN32) || defined(__APPLE__)
-	if (App()->IsUpdaterDisabled()) {
-		ui->actionCheckForUpdates->setEnabled(false);
-#if defined(_WIN32)
-		ui->actionRepair->setEnabled(false);
-#endif
-	}
 #endif
 
 #ifndef WHATSNEW_ENABLED
@@ -2925,9 +2755,6 @@ void OBSBasic::ShowWhatsNew(const QString &url)
 
 void OBSBasic::UpdateMultiviewProjectorMenu()
 {
-	ui->multiviewProjectorMenu->clear();
-	AddProjectorMenuMonitors(ui->multiviewProjectorMenu, this,
-				 &OBSBasic::OpenMultiviewProjector);
 }
 
 void OBSBasic::InitHotkeys()
@@ -3282,12 +3109,6 @@ OBSBasic::~OBSBasic()
 		patronJsonThread->wait();
 
 	delete screenshotData;
-	delete previewProjector;
-	delete studioProgramProjector;
-	delete previewProjectorSource;
-	delete previewProjectorMain;
-	delete sourceProjector;
-	delete sceneProjectorMenu;
 	delete scaleFilteringMenu;
 	delete blendingModeMenu;
 	delete colorMenu;
@@ -3296,7 +3117,6 @@ OBSBasic::~OBSBasic()
 	delete deinterlaceMenu;
 	delete perSceneTransitionMenu;
 	delete shortcutFilter;
-	delete trayMenu;
 	delete programOptions;
 	delete program;
 
@@ -3321,7 +3141,6 @@ OBSBasic::~OBSBasic()
 	delete transformWindow;
 	delete advAudioWindow;
 	delete about;
-	delete remux;
 
 	obs_display_remove_draw_callback(ui->preview->GetDisplay(),
 					 OBSBasic::RenderMain, this);
@@ -3567,8 +3386,6 @@ void OBSBasic::AddScene(OBSSource source)
 		obs_source_t *source = obs_scene_get_source(scene);
 		blog(LOG_INFO, "User added scene '%s'",
 		     obs_source_get_name(source));
-
-		OBSProjector::UpdateMultiviewProjectors();
 	}
 
 	OnEvent(OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED);
@@ -3602,8 +3419,6 @@ void OBSBasic::RemoveScene(OBSSource source)
 	if (!disableSaving) {
 		blog(LOG_INFO, "User Removed scene '%s'",
 		     obs_source_get_name(source));
-
-		OBSProjector::UpdateMultiviewProjectors();
 	}
 
 	OnEvent(OBS_FRONTEND_EVENT_SCENE_LIST_CHANGED);
@@ -3657,20 +3472,10 @@ static void RenameListValues(QListWidget *listWidget, const QString &newName,
 void OBSBasic::RenameSources(OBSSource source, QString newName,
 			     QString prevName)
 {
+	UNUSED_PARAMETER(source);
 	RenameListValues(ui->scenes, newName, prevName);
 
-	if (vcamConfig.type == VCamOutputType::SourceOutput &&
-	    prevName == QString::fromStdString(vcamConfig.source))
-		vcamConfig.source = newName.toStdString();
-	if (vcamConfig.type == VCamOutputType::SceneOutput &&
-	    prevName == QString::fromStdString(vcamConfig.scene))
-		vcamConfig.scene = newName.toStdString();
-
 	SaveProject();
-
-	obs_scene_t *scene = obs_scene_from_source(source);
-	if (scene)
-		OBSProjector::UpdateMultiviewProjectors();
 
 	UpdateContextBar();
 	UpdatePreviewProgramIndicators();
@@ -4335,64 +4140,6 @@ bool OBSBasic::QueryRemoveSource(obs_source_t *source)
 	return Yes == remove_source.clickedButton();
 }
 
-#define UPDATE_CHECK_INTERVAL (60 * 60 * 24 * 4) /* 4 days */
-
-void OBSBasic::TimedCheckForUpdates()
-{
-	if (App()->IsUpdaterDisabled())
-		return;
-	if (!config_get_bool(App()->GetUserConfig(), "General",
-			     "EnableAutoUpdates"))
-		return;
-
-#if defined(ENABLE_SPARKLE_UPDATER)
-	CheckForUpdates(false);
-#elif _WIN32
-	long long lastUpdate = config_get_int(App()->GetAppConfig(), "General",
-					      "LastUpdateCheck");
-	uint32_t lastVersion =
-		config_get_int(App()->GetAppConfig(), "General", "LastVersion");
-
-	if (lastVersion < LIBOBS_API_VER) {
-		lastUpdate = 0;
-		config_set_int(App()->GetAppConfig(), "General",
-			       "LastUpdateCheck", 0);
-	}
-
-	long long t = (long long)time(nullptr);
-	long long secs = t - lastUpdate;
-
-	if (secs > UPDATE_CHECK_INTERVAL)
-		CheckForUpdates(false);
-#endif
-}
-
-void OBSBasic::CheckForUpdates(bool manualUpdate)
-{
-#if _WIN32
-	ui->actionCheckForUpdates->setEnabled(false);
-	ui->actionRepair->setEnabled(false);
-
-	if (updateCheckThread && updateCheckThread->isRunning())
-		return;
-	updateCheckThread.reset(new AutoUpdateThread(manualUpdate));
-	updateCheckThread->start();
-#elif defined(ENABLE_SPARKLE_UPDATER)
-	ui->actionCheckForUpdates->setEnabled(false);
-
-	if (updateCheckThread && updateCheckThread->isRunning())
-		return;
-
-	MacUpdateThread *mut = new MacUpdateThread(manualUpdate);
-	connect(mut, &MacUpdateThread::Result, this,
-		&OBSBasic::MacBranchesFetched, Qt::QueuedConnection);
-	updateCheckThread.reset(mut);
-	updateCheckThread->start();
-#else
-	UNUSED_PARAMETER(manualUpdate);
-#endif
-}
-
 void OBSBasic::MacBranchesFetched(const QString &branch, bool manualUpdate)
 {
 #ifdef ENABLE_SPARKLE_UPDATER
@@ -4410,12 +4157,6 @@ void OBSBasic::MacBranchesFetched(const QString &branch, bool manualUpdate)
 	UNUSED_PARAMETER(branch);
 	UNUSED_PARAMETER(manualUpdate);
 #endif
-}
-
-void OBSBasic::updateCheckFinished()
-{
-	ui->actionCheckForUpdates->setEnabled(true);
-	ui->actionRepair->setEnabled(true);
 }
 
 void OBSBasic::DuplicateSelectedScene()
@@ -4466,57 +4207,8 @@ void OBSBasic::DuplicateSelectedScene()
 		source = obs_scene_get_source(scene);
 		SetCurrentScene(source, true);
 
-		auto undo = [](const std::string &data) {
-			OBSSourceAutoRelease source =
-				obs_get_source_by_name(data.c_str());
-			obs_source_remove(source);
-		};
-
-		auto redo = [this, name](const std::string &data) {
-			OBSSourceAutoRelease source =
-				obs_get_source_by_name(data.c_str());
-			obs_scene_t *scene = obs_scene_from_source(source);
-			scene = obs_scene_duplicate(scene, name.c_str(),
-						    OBS_SCENE_DUP_REFS);
-			source = obs_scene_get_source(scene);
-			SetCurrentScene(source.Get(), true);
-		};
-
-		undo_s.add_action(
-			QTStr("Undo.Scene.Duplicate")
-				.arg(obs_source_get_name(source)),
-			undo, redo, obs_source_get_name(source),
-			obs_source_get_name(obs_scene_get_source(curScene)));
-
 		break;
 	}
-}
-
-static bool save_undo_source_enum(obs_scene_t * /* scene */,
-				  obs_sceneitem_t *item, void *p)
-{
-	obs_source_t *source = obs_sceneitem_get_source(item);
-	if (obs_obj_is_private(source) && !obs_source_removed(source))
-		return true;
-
-	obs_data_array_t *array = (obs_data_array_t *)p;
-
-	/* check if the source is already stored in the array */
-	const char *name = obs_source_get_name(source);
-	const size_t count = obs_data_array_count(array);
-	for (size_t i = 0; i < count; i++) {
-		OBSDataAutoRelease sourceData = obs_data_array_item(array, i);
-		if (strcmp(name, obs_data_get_string(sourceData, "name")) == 0)
-			return true;
-	}
-
-	if (obs_source_is_group(source))
-		obs_scene_enum_items(obs_group_from_source(source),
-				     save_undo_source_enum, p);
-
-	OBSDataAutoRelease source_data = obs_save_source(source);
-	obs_data_array_push_back(array, source_data);
-	return true;
 }
 
 static inline void RemoveSceneAndReleaseNested(obs_source_t *source)
@@ -4538,156 +4230,6 @@ void OBSBasic::RemoveSelectedScene()
 	if (!source || !QueryRemoveSource(source)) {
 		return;
 	}
-
-	/* ------------------------------ */
-	/* save all sources in scene      */
-
-	OBSDataArrayAutoRelease sources_in_deleted_scene =
-		obs_data_array_create();
-
-	obs_scene_enum_items(scene, save_undo_source_enum,
-			     sources_in_deleted_scene);
-
-	OBSDataAutoRelease scene_data = obs_save_source(source);
-	obs_data_array_push_back(sources_in_deleted_scene, scene_data);
-
-	/* ----------------------------------------------- */
-	/* save all scenes and groups the scene is used in */
-
-	OBSDataArrayAutoRelease scene_used_in_other_scenes =
-		obs_data_array_create();
-
-	struct other_scenes_cb_data {
-		obs_source_t *oldScene;
-		obs_data_array_t *scene_used_in_other_scenes;
-	} other_scenes_cb_data;
-	other_scenes_cb_data.oldScene = source;
-	other_scenes_cb_data.scene_used_in_other_scenes =
-		scene_used_in_other_scenes;
-
-	auto other_scenes_cb = [](void *data_ptr, obs_source_t *scene) {
-		struct other_scenes_cb_data *data =
-			(struct other_scenes_cb_data *)data_ptr;
-		if (strcmp(obs_source_get_name(scene),
-			   obs_source_get_name(data->oldScene)) == 0)
-			return true;
-		obs_sceneitem_t *item = obs_scene_find_source(
-			obs_group_or_scene_from_source(scene),
-			obs_source_get_name(data->oldScene));
-		if (item) {
-			OBSDataAutoRelease scene_data =
-				obs_save_source(obs_scene_get_source(
-					obs_sceneitem_get_scene(item)));
-			obs_data_array_push_back(
-				data->scene_used_in_other_scenes, scene_data);
-		}
-		return true;
-	};
-	obs_enum_scenes(other_scenes_cb, &other_scenes_cb_data);
-
-	/* --------------------------- */
-	/* undo/redo                   */
-
-	auto undo = [this](const std::string &json) {
-		OBSDataAutoRelease base =
-			obs_data_create_from_json(json.c_str());
-		OBSDataArrayAutoRelease sources_in_deleted_scene =
-			obs_data_get_array(base, "sources_in_deleted_scene");
-		OBSDataArrayAutoRelease scene_used_in_other_scenes =
-			obs_data_get_array(base, "scene_used_in_other_scenes");
-		int savedIndex = (int)obs_data_get_int(base, "index");
-		std::vector<OBSSource> sources;
-
-		/* create missing sources */
-		size_t count = obs_data_array_count(sources_in_deleted_scene);
-		sources.reserve(count);
-
-		for (size_t i = 0; i < count; i++) {
-			OBSDataAutoRelease data = obs_data_array_item(
-				sources_in_deleted_scene, i);
-			const char *name = obs_data_get_string(data, "name");
-
-			OBSSourceAutoRelease source =
-				obs_get_source_by_name(name);
-			if (!source) {
-				source = obs_load_source(data);
-				sources.push_back(source.Get());
-			}
-		}
-
-		/* actually load sources now */
-		for (obs_source_t *source : sources)
-			obs_source_load2(source);
-
-		/* Add scene to scenes and groups it was nested in */
-		for (size_t i = 0;
-		     i < obs_data_array_count(scene_used_in_other_scenes);
-		     i++) {
-			OBSDataAutoRelease data = obs_data_array_item(
-				scene_used_in_other_scenes, i);
-			const char *name = obs_data_get_string(data, "name");
-			OBSSourceAutoRelease source =
-				obs_get_source_by_name(name);
-
-			OBSDataAutoRelease settings =
-				obs_data_get_obj(data, "settings");
-			OBSDataArrayAutoRelease items =
-				obs_data_get_array(settings, "items");
-
-			/* Clear scene, but keep a reference to all sources in the scene to make sure they don't get destroyed */
-			std::vector<OBSSource> existing_sources;
-			auto cb = [](obs_scene_t *, obs_sceneitem_t *item,
-				     void *data) {
-				std::vector<OBSSource> *existing =
-					(std::vector<OBSSource> *)data;
-				OBSSource source =
-					obs_sceneitem_get_source(item);
-				obs_sceneitem_remove(item);
-				existing->push_back(source);
-				return true;
-			};
-			obs_scene_enum_items(
-				obs_group_or_scene_from_source(source), cb,
-				(void *)&existing_sources);
-
-			/* Re-add sources to the scene */
-			obs_sceneitems_add(
-				obs_group_or_scene_from_source(source), items);
-		}
-
-		obs_source_t *scene_source = sources.back();
-		OBSScene scene = obs_scene_from_source(scene_source);
-		SetCurrentScene(scene, true);
-
-		/* set original index in list box */
-		ui->scenes->blockSignals(true);
-		int curIndex = ui->scenes->currentRow();
-		QListWidgetItem *item = ui->scenes->takeItem(curIndex);
-		ui->scenes->insertItem(savedIndex, item);
-		ui->scenes->setCurrentRow(savedIndex);
-		currentScene = scene.Get();
-		ui->scenes->blockSignals(false);
-	};
-
-	auto redo = [](const std::string &name) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_name(name.c_str());
-		RemoveSceneAndReleaseNested(source);
-	};
-
-	OBSDataAutoRelease data = obs_data_create();
-	obs_data_set_array(data, "sources_in_deleted_scene",
-			   sources_in_deleted_scene);
-	obs_data_set_array(data, "scene_used_in_other_scenes",
-			   scene_used_in_other_scenes);
-	obs_data_set_int(data, "index", ui->scenes->currentRow());
-
-	const char *scene_name = obs_source_get_name(source);
-	undo_s.add_action(QTStr("Undo.Delete").arg(scene_name), undo, redo,
-			  obs_data_get_json(data), scene_name);
-
-	/* --------------------------- */
-	/* remove                      */
 
 	RemoveSceneAndReleaseNested(source);
 
@@ -5112,7 +4654,6 @@ int OBSBasic::ResetVideo()
 			activeConfiguration, "Video", "HdrNominalPeakLevel");
 		obs_set_video_levels(sdr_white_level, hdr_nominal_peak_level);
 		OBSBasicStats::InitializeValues();
-		OBSProjector::UpdateMultiviewProjectors();
 
 		bool canMigrate =
 			usingAbsoluteCoordinates ||
@@ -5249,8 +4790,6 @@ void OBSBasic::CloseDialogs()
 
 	if (!stats.isNull())
 		stats->close(); //call close to save Stats geometry
-	if (!remux.isNull())
-		remux->close();
 }
 
 void OBSBasic::EnumDialogs()
@@ -5276,16 +4815,6 @@ void OBSBasic::EnumDialogs()
 	}
 }
 
-void OBSBasic::ClearProjectors()
-{
-	for (size_t i = 0; i < projectors.size(); i++) {
-		if (projectors[i])
-			delete projectors[i];
-	}
-
-	projectors.clear();
-}
-
 void OBSBasic::ClearSceneData()
 {
 	disableSaving++;
@@ -5300,15 +4829,12 @@ void OBSBasic::ClearSceneData()
 	ClearQuickTransitions();
 	ui->transitions->clear();
 
-	ClearProjectors();
-
 	for (int i = 0; i < MAX_CHANNELS; i++)
 		obs_set_output_source(i, nullptr);
 
 	/* Reset VCam to default to clear its private scene and any references
 	 * it holds. It will be reconfigured during loading. */
 	if (vcamEnabled) {
-		vcamConfig.type = VCamOutputType::ProgramView;
 		outputHandler->UpdateVirtualCamOutputSource();
 	}
 
@@ -5331,8 +4857,6 @@ void OBSBasic::ClearSceneData()
 	obs_enum_sources(cb, nullptr);
 
 	OnEvent(OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP);
-
-	undo_s.clear();
 
 	/* using QEvent::DeferredDelete explicitly is the only way to ensure
 	 * that deleteLater events are processed at this point */
@@ -5442,12 +4966,6 @@ void OBSBasic::closeEvent(QCloseEvent *event)
 		}
 	}
 
-	if (remux && !remux->close()) {
-		event->ignore();
-		restart = false;
-		return;
-	}
-
 	QWidget::closeEvent(event);
 	if (!event->isAccepted())
 		return;
@@ -5550,12 +5068,6 @@ void OBSBasic::changeEvent(QEvent *event)
 			(QWindowStateChangeEvent *)event;
 
 		if (isMinimized()) {
-			if (trayIcon && trayIcon->isVisible() &&
-			    sysTrayMinimizeToTray()) {
-				ToggleShowHide();
-				return;
-			}
-
 			if (previewEnabled)
 				EnablePreviewDisplay(false);
 		} else if (stateEvent->oldState() & Qt::WindowMinimized &&
@@ -5566,96 +5078,6 @@ void OBSBasic::changeEvent(QEvent *event)
 	}
 }
 
-void OBSBasic::on_actionShow_Recordings_triggered()
-{
-	const char *mode =
-		config_get_string(activeConfiguration, "Output", "Mode");
-	const char *type =
-		config_get_string(activeConfiguration, "AdvOut", "RecType");
-	const char *adv_path =
-		strcmp(type, "Standard")
-			? config_get_string(activeConfiguration, "AdvOut",
-					    "FFFilePath")
-			: config_get_string(activeConfiguration, "AdvOut",
-					    "RecFilePath");
-	const char *path = strcmp(mode, "Advanced")
-				   ? config_get_string(activeConfiguration,
-						       "SimpleOutput",
-						       "FilePath")
-				   : adv_path;
-	QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-}
-
-void OBSBasic::on_actionRemux_triggered()
-{
-	if (!remux.isNull()) {
-		remux->show();
-		remux->raise();
-		return;
-	}
-
-	const char *mode =
-		config_get_string(activeConfiguration, "Output", "Mode");
-	const char *path = strcmp(mode, "Advanced")
-				   ? config_get_string(activeConfiguration,
-						       "SimpleOutput",
-						       "FilePath")
-				   : config_get_string(activeConfiguration,
-						       "AdvOut", "RecFilePath");
-
-	OBSRemux *remuxDlg;
-	remuxDlg = new OBSRemux(path, this);
-	remuxDlg->show();
-	remux = remuxDlg;
-}
-
-void OBSBasic::on_action_Settings_triggered()
-{
-	static bool settings_already_executing = false;
-
-	/* Do not load settings window if inside of a temporary event loop
-	 * because we could be inside of an Auth::LoadUI call.  Keep trying
-	 * once per second until we've exit any known sub-loops. */
-	if (os_atomic_load_long(&insideEventLoop) != 0) {
-		QTimer::singleShot(1000, this,
-				   &OBSBasic::on_action_Settings_triggered);
-		return;
-	}
-
-	if (settings_already_executing) {
-		return;
-	}
-
-	settings_already_executing = true;
-
-	{
-		OBSBasicSettings settings(this);
-		settings.exec();
-	}
-
-	settings_already_executing = false;
-
-	if (restart) {
-		QMessageBox::StandardButton button = OBSMessageBox::question(
-			this, QTStr("Restart"), QTStr("NeedsRestart"));
-
-		if (button == QMessageBox::Yes)
-			close();
-		else
-			restart = false;
-	}
-}
-
-void OBSBasic::on_actionShowMacPermissions_triggered()
-{
-#ifdef __APPLE__
-	OBSPermissions check(this, CheckPermission(kScreenCapture),
-			     CheckPermission(kVideoDeviceAccess),
-			     CheckPermission(kAudioDeviceAccess),
-			     CheckPermission(kAccessibility));
-	check.exec();
-#endif
-}
 
 void OBSBasic::ShowMissingFilesDialog(obs_missing_files_t *files)
 {
@@ -5751,7 +5173,7 @@ void OBSBasic::on_scenes_currentItemChanged(QListWidgetItem *current,
 
 	SetCurrentScene(source);
 
-	if (vcamEnabled && vcamConfig.type == VCamOutputType::PreviewOutput)
+	if (vcamEnabled)
 		outputHandler->UpdateVirtualCamOutputSource();
 
 	OnEvent(OBS_FRONTEND_EVENT_PREVIEW_SCENE_CHANGED);
@@ -5768,44 +5190,6 @@ void OBSBasic::EditSceneName()
 	item->setFlags(flags | Qt::ItemIsEditable);
 	ui->scenes->editItem(item);
 	item->setFlags(flags);
-}
-
-QList<QString> OBSBasic::GetProjectorMenuMonitorsFormatted()
-{
-	QList<QString> projectorsFormatted;
-	QList<QScreen *> screens = QGuiApplication::screens();
-	for (int i = 0; i < screens.size(); i++) {
-		QScreen *screen = screens[i];
-		QRect screenGeometry = screen->geometry();
-		qreal ratio = screen->devicePixelRatio();
-		QString name = "";
-#if defined(__APPLE__) || defined(_WIN32)
-		name = screen->name();
-#else
-		name = screen->model().simplified();
-
-		if (name.length() > 1 && name.endsWith("-"))
-			name.chop(1);
-#endif
-		name = name.simplified();
-
-		if (name.length() == 0) {
-			name = QString("%1 %2")
-				       .arg(QTStr("Display"))
-				       .arg(QString::number(i + 1));
-		}
-		QString str =
-			QString("%1: %2x%3 @ %4,%5")
-				.arg(name,
-				     QString::number(screenGeometry.width() *
-						     ratio),
-				     QString::number(screenGeometry.height() *
-						     ratio),
-				     QString::number(screenGeometry.x()),
-				     QString::number(screenGeometry.y()));
-		projectorsFormatted.push_back(str);
-	}
-	return projectorsFormatted;
 }
 
 void OBSBasic::on_scenes_customContextMenuRequested(const QPoint &pos)
@@ -5853,16 +5237,6 @@ void OBSBasic::on_scenes_customContextMenuRequested(const QPoint &pos)
 
 		popup.addSeparator();
 
-		delete sceneProjectorMenu;
-		sceneProjectorMenu = new QMenu(QTStr("SceneProjector"));
-		AddProjectorMenuMonitors(sceneProjectorMenu, this,
-					 &OBSBasic::OpenSceneProjector);
-		popup.addMenu(sceneProjectorMenu);
-
-		QAction *sceneWindow = popup.addAction(
-			QTStr("SceneWindow"), this, &OBSBasic::OpenSceneWindow);
-
-		popup.addAction(sceneWindow);
 		popup.addAction(QTStr("Screenshot.Scene"), this,
 				&OBSBasic::ScreenshotScene);
 		popup.addSeparator();
@@ -5894,7 +5268,6 @@ void OBSBasic::on_scenes_customContextMenuRequested(const QPoint &pos)
 			bool show =
 				obs_data_get_bool(data, "show_in_multiview");
 			obs_data_set_bool(data, "show_in_multiview", !show);
-			OBSProjector::UpdateMultiviewProjectors();
 		};
 
 		connect(multiviewAction, &QAction::triggered,
@@ -5980,23 +5353,6 @@ void OBSBasic::on_actionAddScene_triggered()
 			return;
 		}
 
-		auto undo_fn = [](const std::string &data) {
-			obs_source_t *t = obs_get_source_by_name(data.c_str());
-			if (t) {
-				obs_source_remove(t);
-				obs_source_release(t);
-			}
-		};
-
-		auto redo_fn = [this](const std::string &data) {
-			OBSSceneAutoRelease scene =
-				obs_scene_create(data.c_str());
-			obs_source_t *source = obs_scene_get_source(scene);
-			SetCurrentScene(source, true);
-		};
-		undo_s.add_action(QTStr("Undo.Add").arg(QString(name.c_str())),
-				  undo_fn, redo_fn, name, name);
-
 		OBSSceneAutoRelease scene = obs_scene_create(name.c_str());
 		obs_source_t *scene_source = obs_scene_get_source(scene);
 		SetCurrentScene(scene_source);
@@ -6025,8 +5381,6 @@ void OBSBasic::ChangeSceneIndex(bool relative, int offset, int invalidIdx)
 	item->setSelected(true);
 	currentScene = GetOBSRef<OBSScene>(item).Get();
 	ui->scenes->blockSignals(false);
-
-	OBSProjector::UpdateMultiviewProjectors();
 }
 
 void OBSBasic::on_actionSceneUp_triggered()
@@ -6282,8 +5636,6 @@ ColorSelect::ColorSelect(QWidget *parent)
 void OBSBasic::CreateSourcePopupMenu(int idx, bool preview)
 {
 	QMenu popup(this);
-	delete previewProjectorSource;
-	delete sourceProjector;
 	delete scaleFilteringMenu;
 	delete blendingMethodMenu;
 	delete blendingModeMenu;
@@ -6304,18 +5656,6 @@ void OBSBasic::CreateSourcePopupMenu(int idx, bool preview)
 
 		popup.addAction(ui->actionLockPreview);
 		popup.addMenu(ui->scalingMenu);
-
-		previewProjectorSource = new QMenu(QTStr("PreviewProjector"));
-		AddProjectorMenuMonitors(previewProjectorSource, this,
-					 &OBSBasic::OpenPreviewProjector);
-
-		popup.addMenu(previewProjectorSource);
-
-		QAction *previewWindow =
-			popup.addAction(QTStr("PreviewWindow"), this,
-					&OBSBasic::OpenPreviewWindow);
-
-		popup.addAction(previewWindow);
 
 		popup.addAction(QTStr("Screenshot.Preview"), this,
 				&OBSBasic::ScreenshotScene);
@@ -6421,14 +5761,6 @@ void OBSBasic::CreateSourcePopupMenu(int idx, bool preview)
 			popup.addMenu(CreateVisibilityTransitionMenu(false));
 			popup.addSeparator();
 
-			sourceProjector = new QMenu(QTStr("SourceProjector"));
-			AddProjectorMenuMonitors(
-				sourceProjector, this,
-				&OBSBasic::OpenSourceProjector);
-			popup.addMenu(sourceProjector);
-			popup.addAction(QTStr("SourceWindow"), this,
-					&OBSBasic::OpenSourceWindow);
-
 			popup.addAction(QTStr("Screenshot.Source"), this,
 					&OBSBasic::ScreenshotSelectedSource);
 		}
@@ -6492,7 +5824,7 @@ static inline bool should_show_properties(obs_source_t *source, const char *id)
 void OBSBasic::AddSource(const char *id)
 {
 	if (id && *id) {
-		OBSBasicSourceSelect sourceSelect(this, id, undo_s);
+		OBSBasicSourceSelect sourceSelect(this, id);
 		sourceSelect.exec();
 		if (should_show_properties(sourceSelect.newSource, id)) {
 			CreatePropertiesWindow(sourceSelect.newSource);
@@ -6618,32 +5950,6 @@ static bool remove_items(obs_scene_t *, obs_sceneitem_t *item, void *param)
 	return true;
 };
 
-OBSData OBSBasic::BackupScene(obs_scene_t *scene,
-			      std::vector<obs_source_t *> *sources)
-{
-	OBSDataArrayAutoRelease undo_array = obs_data_array_create();
-
-	if (!sources) {
-		obs_scene_enum_items(scene, save_undo_source_enum, undo_array);
-	} else {
-		for (obs_source_t *source : *sources) {
-			obs_data_t *source_data = obs_save_source(source);
-			obs_data_array_push_back(undo_array, source_data);
-			obs_data_release(source_data);
-		}
-	}
-
-	OBSDataAutoRelease scene_data =
-		obs_save_source(obs_scene_get_source(scene));
-	obs_data_array_push_back(undo_array, scene_data);
-
-	OBSDataAutoRelease data = obs_data_create();
-
-	obs_data_set_array(data, "array", undo_array);
-	obs_data_get_json(data);
-	return data.Get();
-}
-
 static bool add_source_enum(obs_scene_t *, obs_sceneitem_t *item, void *p)
 {
 	auto sources = static_cast<std::vector<OBSSource> *>(p);
@@ -6651,64 +5957,10 @@ static bool add_source_enum(obs_scene_t *, obs_sceneitem_t *item, void *p)
 	return true;
 }
 
-void OBSBasic::CreateSceneUndoRedoAction(const QString &action_name,
-					 OBSData undo_data, OBSData redo_data)
-{
-	auto undo_redo = [this](const std::string &json) {
-		OBSDataAutoRelease base =
-			obs_data_create_from_json(json.c_str());
-		OBSDataArrayAutoRelease array =
-			obs_data_get_array(base, "array");
-		std::vector<OBSSource> sources;
-		std::vector<OBSSource> old_sources;
-
-		/* create missing sources */
-		const size_t count = obs_data_array_count(array);
-		sources.reserve(count);
-
-		for (size_t i = 0; i < count; i++) {
-			OBSDataAutoRelease data = obs_data_array_item(array, i);
-			const char *name = obs_data_get_string(data, "name");
-
-			OBSSourceAutoRelease source =
-				obs_get_source_by_name(name);
-			if (!source)
-				source = obs_load_source(data);
-
-			sources.push_back(source.Get());
-
-			/* update scene/group settings to restore their
-			 * contents to their saved settings */
-			obs_scene_t *scene =
-				obs_group_or_scene_from_source(source);
-			if (scene) {
-				obs_scene_enum_items(scene, add_source_enum,
-						     &old_sources);
-				OBSDataAutoRelease scene_settings =
-					obs_data_get_obj(data, "settings");
-				obs_source_update(source, scene_settings);
-			}
-		}
-
-		/* actually load sources now */
-		for (obs_source_t *source : sources)
-			obs_source_load2(source);
-
-		ui->sources->RefreshItems();
-	};
-
-	const char *undo_json = obs_data_get_last_json(undo_data);
-	const char *redo_json = obs_data_get_last_json(redo_data);
-
-	undo_s.add_action(action_name, undo_redo, undo_redo, undo_json,
-			  redo_json);
-}
-
 void OBSBasic::on_actionRemoveSource_triggered()
 {
 	vector<OBSSceneItem> items;
 	OBSScene scene = GetCurrentScene();
-	obs_source_t *scene_source = obs_scene_get_source(scene);
 
 	obs_scene_enum_items(scene, remove_items, &items);
 
@@ -6744,36 +5996,8 @@ void OBSBasic::on_actionRemoveSource_triggered()
 	if (!confirmed)
 		return;
 
-	/* ----------------------------------------------- */
-	/* save undo data                                  */
-
-	OBSData undo_data = BackupScene(scene_source);
-
-	/* ----------------------------------------------- */
-	/* remove items                                    */
-
 	for (auto &item : items)
 		obs_sceneitem_remove(item);
-
-	/* ----------------------------------------------- */
-	/* save redo data                                  */
-
-	OBSData redo_data = BackupScene(scene_source);
-
-	/* ----------------------------------------------- */
-	/* add undo/redo action                            */
-
-	QString action_name;
-	if (items.size() > 1) {
-		action_name = QTStr("Undo.Sources.Multi")
-				      .arg(QString::number(items.size()));
-	} else {
-		QString str = QTStr("Undo.Delete");
-		action_name = str.arg(obs_source_get_name(
-			obs_sceneitem_get_source(items[0])));
-	}
-
-	CreateSceneUndoRedoAction(action_name, undo_data, redo_data);
 }
 
 void OBSBasic::on_actionInteract_triggered()
@@ -6797,29 +6021,14 @@ void OBSBasic::on_actionSourceProperties_triggered()
 void OBSBasic::MoveSceneItem(enum obs_order_movement movement,
 			     const QString &action_name)
 {
+	UNUSED_PARAMETER(action_name);
 	OBSSceneItem item = GetCurrentSceneItem();
 	obs_source_t *source = obs_sceneitem_get_source(item);
 
 	if (!source)
 		return;
 
-	OBSScene scene = GetCurrentScene();
-	std::vector<obs_source_t *> sources;
-	if (scene != obs_sceneitem_get_scene(item))
-		sources.push_back(
-			obs_scene_get_source(obs_sceneitem_get_scene(item)));
-
-	OBSData undo_data = BackupScene(scene, &sources);
-
 	obs_sceneitem_set_order(item, movement);
-
-	const char *source_name = obs_source_get_name(source);
-	const char *scene_name =
-		obs_source_get_name(obs_scene_get_source(scene));
-
-	OBSData redo_data = BackupScene(scene, &sources);
-	CreateSceneUndoRedoAction(action_name.arg(source_name, scene_name),
-				  undo_data, redo_data);
 }
 
 void OBSBasic::on_actionSourceUp_triggered()
@@ -6871,6 +6080,7 @@ static BPtr<char> ReadLogFile(const char *subdir, const char *log)
 
 void OBSBasic::UploadLog(const char *subdir, const char *file, const bool crash)
 {
+	UNUSED_PARAMETER(crash);
 	BPtr<char> fileString{ReadLogFile(subdir, file)};
 
 	if (!fileString)
@@ -6897,13 +6107,8 @@ void OBSBasic::UploadLog(const char *subdir, const char *file, const bool crash)
 		"https://obsproject.com/logs/upload", "text/plain", ss.str());
 
 	logUploadThread.reset(thread);
-	if (crash) {
-		connect(thread, &RemoteTextThread::Result, this,
-			&OBSBasic::crashUploadFinished);
-	} else {
-		connect(thread, &RemoteTextThread::Result, this,
-			&OBSBasic::logUploadFinished);
-	}
+	connect(thread, &RemoteTextThread::Result, this,
+		&OBSBasic::logUploadFinished);
 	logUploadThread->start();
 }
 
@@ -6940,54 +6145,6 @@ void OBSBasic::on_actionViewCurrentLog_triggered()
 	logView->raise();
 }
 
-void OBSBasic::on_actionShowCrashLogs_triggered()
-{
-	char logDir[512];
-	if (GetAppConfigPath(logDir, sizeof(logDir), "obs-studio/crashes") <= 0)
-		return;
-
-	QUrl url = QUrl::fromLocalFile(QT_UTF8(logDir));
-	QDesktopServices::openUrl(url);
-}
-
-void OBSBasic::on_actionUploadLastCrashLog_triggered()
-{
-	UploadLog("obs-studio/crashes", App()->GetLastCrashLog(), true);
-}
-
-void OBSBasic::on_actionCheckForUpdates_triggered()
-{
-	CheckForUpdates(true);
-}
-
-void OBSBasic::on_actionRepair_triggered()
-{
-#if defined(_WIN32)
-	ui->actionCheckForUpdates->setEnabled(false);
-	ui->actionRepair->setEnabled(false);
-
-	if (updateCheckThread && updateCheckThread->isRunning())
-		return;
-
-	updateCheckThread.reset(new AutoUpdateThread(false, true));
-	updateCheckThread->start();
-#endif
-}
-
-void OBSBasic::on_actionRestartSafe_triggered()
-{
-	QMessageBox::StandardButton button = OBSMessageBox::question(
-		this, QTStr("Restart"),
-		safe_mode ? QTStr("SafeMode.RestartNormal")
-			  : QTStr("SafeMode.Restart"));
-
-	if (button == QMessageBox::Yes) {
-		restart = safe_mode;
-		restart_safe = !safe_mode;
-		close();
-	}
-}
-
 void OBSBasic::logUploadFinished(const QString &text, const QString &error)
 {
 	ui->menuLogFiles->setEnabled(true);
@@ -7001,35 +6158,6 @@ void OBSBasic::logUploadFinished(const QString &text, const QString &error)
 			error);
 		return;
 	}
-	openLogDialog(text, false);
-}
-
-void OBSBasic::crashUploadFinished(const QString &text, const QString &error)
-{
-	ui->menuLogFiles->setEnabled(true);
-#if defined(_WIN32)
-	ui->menuCrashLogs->setEnabled(true);
-#endif
-
-	if (text.isEmpty()) {
-		OBSMessageBox::critical(
-			this, QTStr("LogReturnDialog.ErrorUploadingLog"),
-			error);
-		return;
-	}
-	openLogDialog(text, true);
-}
-
-void OBSBasic::openLogDialog(const QString &text, const bool crash)
-{
-
-	OBSDataAutoRelease returnData =
-		obs_data_create_from_json(QT_TO_UTF8(text));
-	string resURL = obs_data_get_string(returnData, "url");
-	QString logURL = resURL.c_str();
-
-	OBSLogReply logDialog(this, logURL, crash);
-	logDialog.exec();
 }
 
 static void RenameListItem(OBSBasic *parent, QListWidget *listWidget,
@@ -7055,24 +6183,6 @@ static void RenameListItem(OBSBasic *parent, QListWidget *listWidget,
 					       QTStr("NoNameEntered.Text"));
 		}
 	} else {
-		auto undo = [prev = std::string(prevName)](
-				    const std::string &data) {
-			OBSSourceAutoRelease source =
-				obs_get_source_by_uuid(data.c_str());
-			obs_source_set_name(source, prev.c_str());
-		};
-
-		auto redo = [name](const std::string &data) {
-			OBSSourceAutoRelease source =
-				obs_get_source_by_uuid(data.c_str());
-			obs_source_set_name(source, name.c_str());
-		};
-
-		std::string source_uuid(obs_source_get_uuid(source));
-		parent->undo_s.add_action(
-			QTStr("Undo.Rename").arg(name.c_str()), undo, redo,
-			source_uuid, source_uuid);
-
 		listItem->setText(QT_UTF8(name.c_str()));
 		obs_source_set_name(source, name.c_str());
 	}
@@ -7163,11 +6273,6 @@ void OBSBasic::DisplayStreamStartError()
 				  : QTStr("Output.StartFailedGeneric");
 
 	emit StreamingStopped();
-
-	if (sysTrayStream) {
-		sysTrayStream->setText(QTStr("Basic.Main.StartStreaming"));
-		sysTrayStream->setEnabled(true);
-	}
 
 	QMessageBox::critical(this, QTStr("Output.StartStreamFailed"), message);
 }
@@ -7315,11 +6420,6 @@ void OBSBasic::StartStreaming()
 
 	emit StreamingPreparing();
 
-	if (sysTrayStream) {
-		sysTrayStream->setEnabled(false);
-		sysTrayStream->setText("Basic.Main.PreparingStream");
-	}
-
 	auto finish_stream_setup = [&](bool setupStreamingResult) {
 		if (!setupStreamingResult) {
 			DisplayStreamStartError();
@@ -7331,9 +6431,6 @@ void OBSBasic::StartStreaming()
 		SaveProject();
 
 		emit StreamingStarting(autoStartBroadcast);
-
-		if (sysTrayStream)
-			sysTrayStream->setText("Basic.Main.Connecting");
 
 		if (!outputHandler->StartStreaming(service)) {
 			DisplayStreamStartError();
@@ -7365,94 +6462,6 @@ void OBSBasic::StartStreaming()
 
 	setupStreamingGuard =
 		outputHandler->SetupStreaming(service, finish_stream_setup);
-}
-
-void OBSBasic::BroadcastButtonClicked()
-{
-	if (!broadcastReady ||
-	    (!broadcastActive && !outputHandler->StreamingActive())) {
-		SetupBroadcast();
-		return;
-	}
-
-	if (!autoStartBroadcast) {
-#ifdef YOUTUBE_ENABLED
-		std::shared_ptr<YoutubeApiWrappers> ytAuth =
-			dynamic_pointer_cast<YoutubeApiWrappers>(auth);
-		if (ytAuth.get()) {
-			if (!ytAuth->StartLatestBroadcast()) {
-				auto last_error = ytAuth->GetLastError();
-				if (last_error.isEmpty())
-					last_error = QTStr(
-						"YouTube.Actions.Error.YouTubeApi");
-				if (!ytAuth->GetTranslatedError(last_error))
-					last_error =
-						QTStr("YouTube.Actions.Error.BroadcastTransitionFailed")
-							.arg(last_error,
-							     ytAuth->GetBroadcastId());
-
-				OBSMessageBox::warning(
-					this,
-					QTStr("Output.BroadcastStartFailed"),
-					last_error, true);
-				return;
-			}
-		}
-#endif
-		broadcastActive = true;
-		autoStartBroadcast = true; // and clear the flag
-
-		emit BroadcastStreamStarted(autoStopBroadcast);
-	} else if (!autoStopBroadcast) {
-#ifdef YOUTUBE_ENABLED
-		bool confirm = config_get_bool(App()->GetUserConfig(),
-					       "BasicWindow",
-					       "WarnBeforeStoppingStream");
-		if (confirm && isVisible()) {
-			QMessageBox::StandardButton button = OBSMessageBox::question(
-				this, QTStr("ConfirmStop.Title"),
-				QTStr("YouTube.Actions.AutoStopStreamingWarning"),
-				QMessageBox::Yes | QMessageBox::No,
-				QMessageBox::No);
-
-			if (button == QMessageBox::No)
-				return;
-		}
-
-		std::shared_ptr<YoutubeApiWrappers> ytAuth =
-			dynamic_pointer_cast<YoutubeApiWrappers>(auth);
-		if (ytAuth.get()) {
-			if (!ytAuth->StopLatestBroadcast()) {
-				auto last_error = ytAuth->GetLastError();
-				if (last_error.isEmpty())
-					last_error = QTStr(
-						"YouTube.Actions.Error.YouTubeApi");
-				if (!ytAuth->GetTranslatedError(last_error))
-					last_error =
-						QTStr("YouTube.Actions.Error.BroadcastTransitionFailed")
-							.arg(last_error,
-							     ytAuth->GetBroadcastId());
-
-				OBSMessageBox::warning(
-					this,
-					QTStr("Output.BroadcastStopFailed"),
-					last_error, true);
-			}
-		}
-#endif
-		broadcastActive = false;
-		broadcastReady = false;
-
-		autoStopBroadcast = true;
-		QMetaObject::invokeMethod(this, "StopStreaming");
-		emit BroadcastStreamReady(broadcastReady);
-		SetBroadcastFlowEnabled(true);
-	}
-}
-
-void OBSBasic::SetBroadcastFlowEnabled(bool enabled)
-{
-	emit BroadcastFlowEnabled(enabled);
 }
 
 void OBSBasic::SetupBroadcast()
@@ -7506,19 +6515,6 @@ inline void OBSBasic::OnActivate(bool force)
 		lastOutputResolution = {ovi.base_width, ovi.base_height};
 
 		TaskbarOverlaySetStatus(TaskbarOverlayStatusActive);
-		if (trayIcon && trayIcon->isVisible()) {
-#ifdef __APPLE__
-			QIcon trayMask =
-				QIcon(":/res/images/tray_active_macos.svg");
-			trayMask.setIsMask(true);
-			trayIcon->setIcon(
-				QIcon::fromTheme("obs-tray", trayMask));
-#else
-			trayIcon->setIcon(QIcon::fromTheme(
-				"obs-tray-active",
-				QIcon(":/res/images/tray_active.png")));
-#endif
-		}
 	}
 }
 
@@ -7534,42 +6530,10 @@ inline void OBSBasic::OnDeactivate()
 		ClearProcessPriority();
 
 		TaskbarOverlaySetStatus(TaskbarOverlayStatusInactive);
-		if (trayIcon && trayIcon->isVisible()) {
-#ifdef __APPLE__
-			QIcon trayIconFile =
-				QIcon(":/res/images/obs_macos.svg");
-			trayIconFile.setIsMask(true);
-#else
-			QIcon trayIconFile = QIcon(":/res/images/obs.png");
-#endif
-			trayIcon->setIcon(
-				QIcon::fromTheme("obs-tray", trayIconFile));
-		}
-	} else if (outputHandler->Active() && trayIcon &&
-		   trayIcon->isVisible()) {
+	} else if (outputHandler->Active()) {
 		if (os_atomic_load_bool(&recording_paused)) {
-#ifdef __APPLE__
-			QIcon trayIconFile =
-				QIcon(":/res/images/obs_paused_macos.svg");
-			trayIconFile.setIsMask(true);
-#else
-			QIcon trayIconFile =
-				QIcon(":/res/images/obs_paused.png");
-#endif
-			trayIcon->setIcon(QIcon::fromTheme("obs-tray-paused",
-							   trayIconFile));
 			TaskbarOverlaySetStatus(TaskbarOverlayStatusPaused);
 		} else {
-#ifdef __APPLE__
-			QIcon trayIconFile =
-				QIcon(":/res/images/tray_active_macos.svg");
-			trayIconFile.setIsMask(true);
-#else
-			QIcon trayIconFile =
-				QIcon(":/res/images/tray_active.png");
-#endif
-			trayIcon->setIcon(QIcon::fromTheme("obs-tray-active",
-							   trayIconFile));
 			TaskbarOverlaySetStatus(TaskbarOverlayStatusActive);
 		}
 	}
@@ -7665,11 +6629,6 @@ void OBSBasic::StreamDelayStarting(int sec)
 {
 	emit StreamingStarted(true);
 
-	if (sysTrayStream) {
-		sysTrayStream->setText(QTStr("Basic.Main.StopStreaming"));
-		sysTrayStream->setEnabled(true);
-	}
-
 	ui->statusbar->StreamDelayStarting(sec);
 
 	OnActivate();
@@ -7678,11 +6637,6 @@ void OBSBasic::StreamDelayStarting(int sec)
 void OBSBasic::StreamDelayStopping(int sec)
 {
 	emit StreamingStopped(true);
-
-	if (sysTrayStream) {
-		sysTrayStream->setText(QTStr("Basic.Main.StartStreaming"));
-		sysTrayStream->setEnabled(true);
-	}
 
 	ui->statusbar->StreamDelayStopping(sec);
 
@@ -7694,11 +6648,6 @@ void OBSBasic::StreamingStart()
 	emit StreamingStarted();
 	OBSOutputAutoRelease output = obs_frontend_get_streaming_output();
 	ui->statusbar->StreamStarted(output);
-
-	if (sysTrayStream) {
-		sysTrayStream->setText(QTStr("Basic.Main.StopStreaming"));
-		sysTrayStream->setEnabled(true);
-	}
 
 #ifdef YOUTUBE_ENABLED
 	if (!autoStartBroadcast) {
@@ -7732,9 +6681,6 @@ void OBSBasic::StreamingStart()
 void OBSBasic::StreamStopping()
 {
 	emit StreamingStopping();
-
-	if (sysTrayStream)
-		sysTrayStream->setText(QTStr("Basic.Main.StoppingStreaming"));
 
 	streamingStopping = true;
 	OnEvent(OBS_FRONTEND_EVENT_STREAMING_STOPPING);
@@ -7792,11 +6738,6 @@ void OBSBasic::StreamingStop(int code, QString last_error)
 
 	emit StreamingStopped();
 
-	if (sysTrayStream) {
-		sysTrayStream->setText(QTStr("Basic.Main.StartStreaming"));
-		sysTrayStream->setEnabled(true);
-	}
-
 	streamingStopping = false;
 	OnEvent(OBS_FRONTEND_EVENT_STREAMING_STOPPED);
 
@@ -7828,74 +6769,6 @@ void OBSBasic::StreamingStop(int code, QString last_error)
 			      QSystemTrayIcon::Warning);
 	}
 
-	// Reset broadcast button state/text
-	if (!broadcastActive)
-		SetBroadcastFlowEnabled(auth && auth->broadcastFlow());
-}
-
-void OBSBasic::AutoRemux(QString input, bool no_show)
-{
-	auto config = Config();
-
-	bool autoRemux = config_get_bool(config, "Video", "AutoRemux");
-
-	if (!autoRemux)
-		return;
-
-	bool isSimpleMode = false;
-
-	const char *mode = config_get_string(config, "Output", "Mode");
-	if (!mode) {
-		isSimpleMode = true;
-	} else {
-		isSimpleMode = strcmp(mode, "Simple") == 0;
-	}
-
-	if (!isSimpleMode) {
-		const char *recType =
-			config_get_string(config, "AdvOut", "RecType");
-
-		bool ffmpegOutput = astrcmpi(recType, "FFmpeg") == 0;
-
-		if (ffmpegOutput)
-			return;
-	}
-
-	if (input.isEmpty())
-		return;
-
-	QFileInfo fi(input);
-	QString suffix = fi.suffix();
-
-	/* do not remux if lossless */
-	if (suffix.compare("avi", Qt::CaseInsensitive) == 0) {
-		return;
-	}
-
-	QString path = fi.path();
-
-	QString output = input;
-	output.resize(output.size() - suffix.size());
-
-	const obs_encoder_t *videoEncoder =
-		obs_output_get_video_encoder(outputHandler->fileOutput);
-	const char *vCodecName = obs_encoder_get_codec(videoEncoder);
-	const char *format = config_get_string(
-		config, isSimpleMode ? "SimpleOutput" : "AdvOut", "RecFormat2");
-
-	/* Retain original container for fMP4/fMOV */
-	if (strncmp(format, "fragmented", 10) == 0) {
-		output += "remuxed." + suffix;
-	} else if (strcmp(vCodecName, "prores") == 0) {
-		output += "mov";
-	} else {
-		output += "mp4";
-	}
-
-	OBSRemux *remux = new OBSRemux(QT_TO_UTF8(path), this, true);
-	if (!no_show)
-		remux->show();
-	remux->AutoRemux(input, output);
 }
 
 void OBSBasic::StartRecording()
@@ -7926,9 +6799,6 @@ void OBSBasic::RecordStopping()
 {
 	emit RecordingStopping();
 
-	if (sysTrayRecord)
-		sysTrayRecord->setText(QTStr("Basic.Main.StoppingRecording"));
-
 	recordingStopping = true;
 	OnEvent(OBS_FRONTEND_EVENT_RECORDING_STOPPING);
 }
@@ -7948,9 +6818,6 @@ void OBSBasic::RecordingStart()
 	ui->statusbar->RecordingStarted(outputHandler->fileOutput);
 	emit RecordingStarted(isRecordingPausable);
 
-	if (sysTrayRecord)
-		sysTrayRecord->setText(QTStr("Basic.Main.StopRecording"));
-
 	recordingStopping = false;
 	OnEvent(OBS_FRONTEND_EVENT_RECORDING_STARTED);
 
@@ -7966,9 +6833,6 @@ void OBSBasic::RecordingStop(int code, QString last_error)
 {
 	ui->statusbar->RecordingStopped();
 	emit RecordingStopped();
-
-	if (sysTrayRecord)
-		sysTrayRecord->setText(QTStr("Basic.Main.StartRecording"));
 
 	blog(LOG_INFO, RECORDING_STOP);
 
@@ -8031,8 +6895,6 @@ void OBSBasic::RecordingStop(int code, QString last_error)
 	if (diskFullTimer->isActive())
 		diskFullTimer->stop();
 
-	AutoRemux(outputHandler->lastRecordingPath.c_str());
-
 	OnDeactivate();
 }
 
@@ -8040,8 +6902,6 @@ void OBSBasic::RecordingFileChanged(QString lastRecordingPath)
 {
 	QString str = QTStr("Basic.StatusBar.RecordingSavedTo");
 	ShowStatusBarMessage(str.arg(lastRecordingPath));
-
-	AutoRemux(lastRecordingPath, true);
 }
 
 void OBSBasic::ShowReplayBufferPauseWarning()
@@ -8115,10 +6975,6 @@ void OBSBasic::ReplayBufferStopping()
 
 	emit ReplayBufStopping();
 
-	if (sysTrayReplayBuffer)
-		sysTrayReplayBuffer->setText(
-			QTStr("Basic.Main.StoppingReplayBuffer"));
-
 	replayBufferStopping = true;
 	OnEvent(OBS_FRONTEND_EVENT_REPLAY_BUFFER_STOPPING);
 }
@@ -8142,10 +6998,6 @@ void OBSBasic::ReplayBufferStart()
 		return;
 
 	emit ReplayBufStarted();
-
-	if (sysTrayReplayBuffer)
-		sysTrayReplayBuffer->setText(
-			QTStr("Basic.Main.StopReplayBuffer"));
 
 	replayBufferStopping = false;
 	OnEvent(OBS_FRONTEND_EVENT_REPLAY_BUFFER_STARTED);
@@ -8188,8 +7040,6 @@ void OBSBasic::ReplayBufferSaved()
 	calldata_free(&cd);
 
 	OnEvent(OBS_FRONTEND_EVENT_REPLAY_BUFFER_SAVED);
-
-	AutoRemux(QT_UTF8(path.c_str()));
 }
 
 void OBSBasic::ReplayBufferStop(int code)
@@ -8198,10 +7048,6 @@ void OBSBasic::ReplayBufferStop(int code)
 		return;
 
 	emit ReplayBufStopped();
-
-	if (sysTrayReplayBuffer)
-		sysTrayReplayBuffer->setText(
-			QTStr("Basic.Main.StartReplayBuffer"));
 
 	blog(LOG_INFO, REPLAY_BUFFER_STOP);
 
@@ -8270,9 +7116,6 @@ void OBSBasic::OnVirtualCamStart()
 
 	emit VirtualCamStarted();
 
-	if (sysTrayVirtualCam)
-		sysTrayVirtualCam->setText(QTStr("Basic.Main.StopVirtualCam"));
-
 	OnEvent(OBS_FRONTEND_EVENT_VIRTUALCAM_STARTED);
 
 	OnActivate();
@@ -8287,21 +7130,11 @@ void OBSBasic::OnVirtualCamStop(int)
 
 	emit VirtualCamStopped();
 
-	if (sysTrayVirtualCam)
-		sysTrayVirtualCam->setText(QTStr("Basic.Main.StartVirtualCam"));
-
 	OnEvent(OBS_FRONTEND_EVENT_VIRTUALCAM_STOPPED);
 
 	blog(LOG_INFO, VIRTUAL_CAM_STOP);
 
 	OnDeactivate();
-
-	if (!restartingVCam)
-		return;
-
-	/* Restarting needs to be delayed to make sure that the virtual camera
-	 * implementation is stopped and avoid race condition. */
-	QTimer::singleShot(100, this, &OBSBasic::RestartingVirtualCam);
 }
 
 void OBSBasic::StreamActionTriggered()
@@ -8353,9 +7186,6 @@ void OBSBasic::StreamActionTriggered()
 		switch (action) {
 		case StreamSettingsAction::ContinueStream:
 			break;
-		case StreamSettingsAction::OpenSettings:
-			on_action_Settings_triggered();
-			return;
 		case StreamSettingsAction::Cancel:
 			return;
 		}
@@ -8441,66 +7271,6 @@ void OBSBasic::VirtualCamActionTriggered()
 
 void OBSBasic::OpenVirtualCamConfig()
 {
-	OBSBasicVCamConfig dialog(vcamConfig, outputHandler->VirtualCamActive(),
-				  this);
-
-	connect(&dialog, &OBSBasicVCamConfig::Accepted, this,
-		&OBSBasic::UpdateVirtualCamConfig);
-	connect(&dialog, &OBSBasicVCamConfig::AcceptedAndRestart, this,
-		&OBSBasic::RestartVirtualCam);
-
-	dialog.exec();
-}
-
-void log_vcam_changed(const VCamConfig &config, bool starting)
-{
-	const char *action = starting ? "Starting" : "Changing";
-
-	switch (config.type) {
-	case VCamOutputType::Invalid:
-		break;
-	case VCamOutputType::ProgramView:
-		blog(LOG_INFO, "%s Virtual Camera output to Program", action);
-		break;
-	case VCamOutputType::PreviewOutput:
-		blog(LOG_INFO, "%s Virtual Camera output to Preview", action);
-		break;
-	case VCamOutputType::SceneOutput:
-		blog(LOG_INFO, "%s Virtual Camera output to Scene : %s", action,
-		     config.scene.c_str());
-		break;
-	case VCamOutputType::SourceOutput:
-		blog(LOG_INFO, "%s Virtual Camera output to Source : %s",
-		     action, config.source.c_str());
-		break;
-	}
-}
-
-void OBSBasic::UpdateVirtualCamConfig(const VCamConfig &config)
-{
-	vcamConfig = config;
-
-	outputHandler->UpdateVirtualCamOutputSource();
-	log_vcam_changed(config, false);
-}
-
-void OBSBasic::RestartVirtualCam(const VCamConfig &config)
-{
-	restartingVCam = true;
-
-	StopVirtualCam();
-
-	vcamConfig = config;
-}
-
-void OBSBasic::RestartingVirtualCam()
-{
-	if (!restartingVCam)
-		return;
-
-	outputHandler->UpdateVirtualCamOutputSource();
-	StartVirtualCam();
-	restartingVCam = false;
 }
 
 void OBSBasic::on_actionHelpPortal_triggered()
@@ -8521,56 +7291,6 @@ void OBSBasic::on_actionDiscord_triggered()
 	QDesktopServices::openUrl(url);
 }
 
-void OBSBasic::on_actionShowWhatsNew_triggered()
-{
-#ifdef WHATSNEW_ENABLED
-	if (introCheckThread && introCheckThread->isRunning())
-		return;
-	if (!cef)
-		return;
-
-	config_set_int(App()->GetAppConfig(), "General", "InfoIncrement", -1);
-
-	WhatsNewInfoThread *wnit = new WhatsNewInfoThread();
-	connect(wnit, &WhatsNewInfoThread::Result, this,
-		&OBSBasic::ReceivedIntroJson, Qt::QueuedConnection);
-
-	introCheckThread.reset(wnit);
-	introCheckThread->start();
-#endif
-}
-
-void OBSBasic::on_actionReleaseNotes_triggered()
-{
-	QString addr("https://github.com/obsproject/obs-studio/releases");
-	QUrl url(QString("%1/%2").arg(addr, obs_get_version_string()),
-		 QUrl::TolerantMode);
-	QDesktopServices::openUrl(url);
-}
-
-void OBSBasic::on_actionShowSettingsFolder_triggered()
-{
-	const std::string userConfigPath =
-		App()->userConfigLocation.u8string() + "/obs-studio";
-	const QString userConfigLocation =
-		QString::fromStdString(userConfigPath);
-
-	QDesktopServices::openUrl(QUrl::fromLocalFile(userConfigLocation));
-}
-
-void OBSBasic::on_actionShowProfileFolder_triggered()
-{
-	std::string userProfilePath;
-	userProfilePath.reserve(App()->userProfilesLocation.u8string().size() +
-				OBSProfilePath.size());
-	userProfilePath.append(App()->userProfilesLocation.u8string())
-		.append(OBSProfilePath);
-
-	const QString userProfileLocation =
-		QString::fromStdString(userProfilePath);
-
-	QDesktopServices::openUrl(QUrl::fromLocalFile(userProfileLocation));
-}
 
 int OBSBasic::GetTopSelectedSourceItem()
 {
@@ -8592,25 +7312,14 @@ void OBSBasic::on_preview_customContextMenuRequested()
 void OBSBasic::ProgramViewContextMenuRequested()
 {
 	QMenu popup(this);
-	QPointer<QMenu> studioProgramProjector;
-
-	studioProgramProjector = new QMenu(QTStr("StudioProgramProjector"));
-	AddProjectorMenuMonitors(studioProgramProjector, this,
-				 &OBSBasic::OpenStudioProgramProjector);
-
-	popup.addMenu(studioProgramProjector);
-	popup.addAction(QTStr("StudioProgramWindow"), this,
-			&OBSBasic::OpenStudioProgramWindow);
 	popup.addAction(QTStr("Screenshot.StudioProgram"), this,
 			&OBSBasic::ScreenshotProgram);
-
 	popup.exec(QCursor::pos());
 }
 
 void OBSBasic::on_previewDisabledWidget_customContextMenuRequested()
 {
 	QMenu popup(this);
-	delete previewProjectorMain;
 
 	QAction *action =
 		popup.addAction(QTStr("Basic.Main.PreviewConextMenu.Enable"),
@@ -8618,15 +7327,6 @@ void OBSBasic::on_previewDisabledWidget_customContextMenuRequested()
 	action->setCheckable(true);
 	action->setChecked(obs_display_enabled(ui->preview->GetDisplay()));
 
-	previewProjectorMain = new QMenu(QTStr("PreviewProjector"));
-	AddProjectorMenuMonitors(previewProjectorMain, this,
-				 &OBSBasic::OpenPreviewProjector);
-
-	QAction *previewWindow = popup.addAction(QTStr("PreviewWindow"), this,
-						 &OBSBasic::OpenPreviewWindow);
-
-	popup.addMenu(previewProjectorMain);
-	popup.addAction(previewWindow);
 	popup.exec(QCursor::pos());
 }
 
@@ -8881,21 +7581,8 @@ void OBSBasic::on_actionCopyTransform_triggered()
 	hasCopiedTransform = true;
 }
 
-void undo_redo(const std::string &data)
-{
-	OBSDataAutoRelease dat = obs_data_create_from_json(data.c_str());
-	OBSSourceAutoRelease source =
-		obs_get_source_by_uuid(obs_data_get_string(dat, "scene_uuid"));
-	reinterpret_cast<OBSBasic *>(App()->GetMainWindow())
-		->SetCurrentScene(source.Get(), true);
-
-	obs_scene_load_transform_states(data.c_str());
-}
-
 void OBSBasic::on_actionPasteTransform_triggered()
 {
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	auto func = [](obs_scene_t *, obs_sceneitem_t *item, void *data) {
 		if (!obs_sceneitem_selected(item))
 			return true;
@@ -8913,16 +7600,6 @@ void OBSBasic::on_actionPasteTransform_triggered()
 	};
 
 	obs_scene_enum_items(GetCurrentScene(), func, this);
-
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(
-		QTStr("Undo.Transform.Paste")
-			.arg(obs_source_get_name(GetCurrentSceneSource())),
-		undo_redo, undo_redo, undo_data, redo_data);
 }
 
 static bool reset_tr(obs_scene_t * /* scene */, obs_sceneitem_t *item, void *)
@@ -8957,21 +7634,6 @@ static bool reset_tr(obs_scene_t * /* scene */, obs_sceneitem_t *item, void *)
 
 void OBSBasic::on_actionResetTransform_triggered()
 {
-	OBSScene scene = GetCurrentScene();
-
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(scene, false);
-	obs_scene_enum_items(scene, reset_tr, nullptr);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(scene, false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(
-		QTStr("Undo.Transform.Reset")
-			.arg(obs_source_get_name(obs_scene_get_source(scene))),
-		undo_redo, undo_redo, undo_data, redo_data);
-
 	obs_scene_enum_items(GetCurrentScene(), reset_tr, nullptr);
 }
 
@@ -9048,52 +7710,19 @@ static bool RotateSelectedSources(obs_scene_t * /* scene */,
 void OBSBasic::on_actionRotate90CW_triggered()
 {
 	float f90CW = 90.0f;
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	obs_scene_enum_items(GetCurrentScene(), RotateSelectedSources, &f90CW);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(QTStr("Undo.Transform.Rotate")
-				  .arg(obs_source_get_name(obs_scene_get_source(
-					  GetCurrentScene()))),
-			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
 void OBSBasic::on_actionRotate90CCW_triggered()
 {
 	float f90CCW = -90.0f;
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	obs_scene_enum_items(GetCurrentScene(), RotateSelectedSources, &f90CCW);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(QTStr("Undo.Transform.Rotate")
-				  .arg(obs_source_get_name(obs_scene_get_source(
-					  GetCurrentScene()))),
-			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
 void OBSBasic::on_actionRotate180_triggered()
 {
 	float f180 = 180.0f;
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	obs_scene_enum_items(GetCurrentScene(), RotateSelectedSources, &f180);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(QTStr("Undo.Transform.Rotate")
-				  .arg(obs_source_get_name(obs_scene_get_source(
-					  GetCurrentScene()))),
-			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
 static bool MultiplySelectedItemScale(obs_scene_t * /* scene */,
@@ -9127,38 +7756,16 @@ void OBSBasic::on_actionFlipHorizontal_triggered()
 {
 	vec2 scale;
 	vec2_set(&scale, -1.0f, 1.0f);
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	obs_scene_enum_items(GetCurrentScene(), MultiplySelectedItemScale,
 			     &scale);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(QTStr("Undo.Transform.HFlip")
-				  .arg(obs_source_get_name(obs_scene_get_source(
-					  GetCurrentScene()))),
-			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
 void OBSBasic::on_actionFlipVertical_triggered()
 {
 	vec2 scale;
 	vec2_set(&scale, 1.0f, -1.0f);
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	obs_scene_enum_items(GetCurrentScene(), MultiplySelectedItemScale,
 			     &scale);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(QTStr("Undo.Transform.VFlip")
-				  .arg(obs_source_get_name(obs_scene_get_source(
-					  GetCurrentScene()))),
-			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
 static bool CenterAlignSelectedItems(obs_scene_t * /* scene */,
@@ -9198,37 +7805,15 @@ static bool CenterAlignSelectedItems(obs_scene_t * /* scene */,
 void OBSBasic::on_actionFitToScreen_triggered()
 {
 	obs_bounds_type boundsType = OBS_BOUNDS_SCALE_INNER;
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	obs_scene_enum_items(GetCurrentScene(), CenterAlignSelectedItems,
 			     &boundsType);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(QTStr("Undo.Transform.FitToScreen")
-				  .arg(obs_source_get_name(obs_scene_get_source(
-					  GetCurrentScene()))),
-			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
 void OBSBasic::on_actionStretchToScreen_triggered()
 {
 	obs_bounds_type boundsType = OBS_BOUNDS_STRETCH;
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	obs_scene_enum_items(GetCurrentScene(), CenterAlignSelectedItems,
 			     &boundsType);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(QTStr("Undo.Transform.StretchToScreen")
-				  .arg(obs_source_get_name(obs_scene_get_source(
-					  GetCurrentScene()))),
-			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
 void OBSBasic::CenterSelectedSceneItems(const CenterType &centerType)
@@ -9319,52 +7904,19 @@ void OBSBasic::CenterSelectedSceneItems(const CenterType &centerType)
 void OBSBasic::on_actionCenterToScreen_triggered()
 {
 	CenterType centerType = CenterType::Scene;
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	CenterSelectedSceneItems(centerType);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(QTStr("Undo.Transform.Center")
-				  .arg(obs_source_get_name(obs_scene_get_source(
-					  GetCurrentScene()))),
-			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
 void OBSBasic::on_actionVerticalCenter_triggered()
 {
 	CenterType centerType = CenterType::Vertical;
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	CenterSelectedSceneItems(centerType);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(QTStr("Undo.Transform.VCenter")
-				  .arg(obs_source_get_name(obs_scene_get_source(
-					  GetCurrentScene()))),
-			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
 void OBSBasic::on_actionHorizontalCenter_triggered()
 {
 	CenterType centerType = CenterType::Horizontal;
-	OBSDataAutoRelease wrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
 	CenterSelectedSceneItems(centerType);
-	OBSDataAutoRelease rwrapper =
-		obs_scene_save_transform_states(GetCurrentScene(), false);
-
-	std::string undo_data(obs_data_get_json(wrapper));
-	std::string redo_data(obs_data_get_json(rwrapper));
-	undo_s.add_action(QTStr("Undo.Transform.HCenter")
-				  .arg(obs_source_get_name(obs_scene_get_source(
-					  GetCurrentScene()))),
-			  undo_redo, undo_redo, undo_data, redo_data);
 }
 
 void OBSBasic::EnablePreviewDisplay(bool enable)
@@ -9465,205 +8017,43 @@ void OBSBasic::Nudge(int dist, MoveDir dir)
 		break;
 	}
 
-	if (!recent_nudge) {
-		recent_nudge = true;
-		OBSDataAutoRelease wrapper = obs_scene_save_transform_states(
-			GetCurrentScene(), true);
-		std::string undo_data(obs_data_get_json(wrapper));
-
-		nudge_timer = new QTimer;
-		QObject::connect(
-			nudge_timer, &QTimer::timeout,
-			[this, &recent_nudge = recent_nudge, undo_data]() {
-				OBSDataAutoRelease rwrapper =
-					obs_scene_save_transform_states(
-						GetCurrentScene(), true);
-				std::string redo_data(
-					obs_data_get_json(rwrapper));
-
-				undo_s.add_action(
-					QTStr("Undo.Transform")
-						.arg(obs_source_get_name(
-							GetCurrentSceneSource())),
-					undo_redo, undo_redo, undo_data,
-					redo_data);
-
-				recent_nudge = false;
-			});
-		connect(nudge_timer, &QTimer::timeout, nudge_timer,
-			&QTimer::deleteLater);
-		nudge_timer->setSingleShot(true);
-	}
-
-	if (nudge_timer) {
-		nudge_timer->stop();
-		nudge_timer->start(1000);
-	} else {
-		blog(LOG_ERROR, "No nudge timer!");
-	}
-
 	obs_scene_enum_items(GetCurrentScene(), nudge_callback, &offset);
-}
-
-void OBSBasic::DeleteProjector(OBSProjector *projector)
-{
-	for (size_t i = 0; i < projectors.size(); i++) {
-		if (projectors[i] == projector) {
-			projectors[i]->deleteLater();
-			projectors.erase(projectors.begin() + i);
-			break;
-		}
-	}
-}
-
-OBSProjector *OBSBasic::OpenProjector(obs_source_t *source, int monitor,
-				      ProjectorType type)
-{
-	/* seriously?  10 monitors? */
-	if (monitor > 9 || monitor > QGuiApplication::screens().size() - 1)
-		return nullptr;
-
-	bool closeProjectors = config_get_bool(App()->GetUserConfig(),
-					       "BasicWindow",
-					       "CloseExistingProjectors");
-
-	if (closeProjectors && monitor > -1) {
-		for (size_t i = projectors.size(); i > 0; i--) {
-			size_t idx = i - 1;
-			if (projectors[idx]->GetMonitor() == monitor)
-				DeleteProjector(projectors[idx]);
-		}
-	}
-
-	OBSProjector *projector =
-		new OBSProjector(nullptr, source, monitor, type);
-
-	projectors.emplace_back(projector);
-
-	return projector;
 }
 
 void OBSBasic::OpenStudioProgramProjector()
 {
-	int monitor = sender()->property("monitor").toInt();
-	OpenProjector(nullptr, monitor, ProjectorType::StudioProgram);
 }
 
 void OBSBasic::OpenPreviewProjector()
 {
-	int monitor = sender()->property("monitor").toInt();
-	OpenProjector(nullptr, monitor, ProjectorType::Preview);
 }
 
 void OBSBasic::OpenSourceProjector()
 {
-	int monitor = sender()->property("monitor").toInt();
-	OBSSceneItem item = GetCurrentSceneItem();
-	if (!item)
-		return;
-
-	OpenProjector(obs_sceneitem_get_source(item), monitor,
-		      ProjectorType::Source);
 }
 
 void OBSBasic::OpenMultiviewProjector()
 {
-	int monitor = sender()->property("monitor").toInt();
-	OpenProjector(nullptr, monitor, ProjectorType::Multiview);
 }
 
 void OBSBasic::OpenSceneProjector()
 {
-	int monitor = sender()->property("monitor").toInt();
-	OBSScene scene = GetCurrentScene();
-	if (!scene)
-		return;
-
-	OpenProjector(obs_scene_get_source(scene), monitor,
-		      ProjectorType::Scene);
 }
 
 void OBSBasic::OpenStudioProgramWindow()
 {
-	OpenProjector(nullptr, -1, ProjectorType::StudioProgram);
 }
 
 void OBSBasic::OpenPreviewWindow()
 {
-	OpenProjector(nullptr, -1, ProjectorType::Preview);
 }
 
 void OBSBasic::OpenSourceWindow()
 {
-	OBSSceneItem item = GetCurrentSceneItem();
-	if (!item)
-		return;
-
-	OBSSource source = obs_sceneitem_get_source(item);
-
-	OpenProjector(obs_sceneitem_get_source(item), -1,
-		      ProjectorType::Source);
 }
 
 void OBSBasic::OpenSceneWindow()
 {
-	OBSScene scene = GetCurrentScene();
-	if (!scene)
-		return;
-
-	OBSSource source = obs_scene_get_source(scene);
-
-	OpenProjector(obs_scene_get_source(scene), -1, ProjectorType::Scene);
-}
-
-void OBSBasic::OpenSavedProjectors()
-{
-	for (SavedProjectorInfo *info : savedProjectorsArray) {
-		OpenSavedProjector(info);
-	}
-}
-
-void OBSBasic::OpenSavedProjector(SavedProjectorInfo *info)
-{
-	if (info) {
-		OBSProjector *projector = nullptr;
-		switch (info->type) {
-		case ProjectorType::Source:
-		case ProjectorType::Scene: {
-			OBSSourceAutoRelease source =
-				obs_get_source_by_name(info->name.c_str());
-			if (!source)
-				return;
-
-			projector = OpenProjector(source, info->monitor,
-						  info->type);
-			break;
-		}
-		default: {
-			projector = OpenProjector(nullptr, info->monitor,
-						  info->type);
-			break;
-		}
-		}
-
-		if (projector && !info->geometry.empty() && info->monitor < 0) {
-			QByteArray byteArray = QByteArray::fromBase64(
-				QByteArray(info->geometry.c_str()));
-			projector->restoreGeometry(byteArray);
-
-			if (!WindowPositionValid(projector->normalGeometry())) {
-				QRect rect = QGuiApplication::primaryScreen()
-						     ->geometry();
-				projector->setGeometry(QStyle::alignedRect(
-					Qt::LeftToRight, Qt::AlignCenter,
-					size(), rect));
-			}
-
-			if (info->alwaysOnTopOverridden)
-				projector->SetIsAlwaysOnTop(info->alwaysOnTop,
-							    true);
-		}
-	}
 }
 
 void OBSBasic::on_actionFullscreenInterface_triggered()
@@ -9882,11 +8272,6 @@ void OBSBasic::on_resetUI_triggered()
 			false);
 }
 
-void OBSBasic::on_multiviewProjectorWindowed_triggered()
-{
-	OpenProjector(nullptr, -1, ProjectorType::Multiview);
-}
-
 void OBSBasic::on_toggleListboxToolbars_toggled(bool visible)
 {
 	ui->sourcesToolbar->setVisible(visible);
@@ -10010,8 +8395,6 @@ void OBSBasic::SetShowing(bool showing)
 			}
 		}
 
-		if (showHide)
-			showHide->setText(QTStr("Basic.SystemTray.Show"));
 		QTimer::singleShot(0, this, &OBSBasic::hide);
 
 		if (previewEnabled)
@@ -10022,8 +8405,6 @@ void OBSBasic::SetShowing(bool showing)
 #endif
 
 	} else if (showing && !isVisible()) {
-		if (showHide)
-			showHide->setText(QTStr("Basic.SystemTray.Hide"));
 		QTimer::singleShot(0, this, &OBSBasic::show);
 
 		if (previewEnabled)
@@ -10071,88 +8452,10 @@ void OBSBasic::ToggleShowHide()
 
 void OBSBasic::SystemTrayInit()
 {
-#ifdef __APPLE__
-	QIcon trayIconFile = QIcon(":/res/images/obs_macos.svg");
-	trayIconFile.setIsMask(true);
-#else
-	QIcon trayIconFile = QIcon(":/res/images/obs.png");
-#endif
-	trayIcon.reset(new QSystemTrayIcon(
-		QIcon::fromTheme("obs-tray", trayIconFile), this));
-	trayIcon->setToolTip("OBS Studio");
-
-	showHide = new QAction(QTStr("Basic.SystemTray.Show"), trayIcon.data());
-	sysTrayStream = new QAction(
-		StreamingActive() ? QTStr("Basic.Main.StopStreaming")
-				  : QTStr("Basic.Main.StartStreaming"),
-		trayIcon.data());
-	sysTrayRecord = new QAction(
-		RecordingActive() ? QTStr("Basic.Main.StopRecording")
-				  : QTStr("Basic.Main.StartRecording"),
-		trayIcon.data());
-	sysTrayReplayBuffer = new QAction(
-		ReplayBufferActive() ? QTStr("Basic.Main.StopReplayBuffer")
-				     : QTStr("Basic.Main.StartReplayBuffer"),
-		trayIcon.data());
-	sysTrayVirtualCam = new QAction(
-		VirtualCamActive() ? QTStr("Basic.Main.StopVirtualCam")
-				   : QTStr("Basic.Main.StartVirtualCam"),
-		trayIcon.data());
-	exit = new QAction(QTStr("Exit"), trayIcon.data());
-
-	trayMenu = new QMenu;
-	previewProjector = new QMenu(QTStr("PreviewProjector"));
-	studioProgramProjector = new QMenu(QTStr("StudioProgramProjector"));
-	AddProjectorMenuMonitors(previewProjector, this,
-				 &OBSBasic::OpenPreviewProjector);
-	AddProjectorMenuMonitors(studioProgramProjector, this,
-				 &OBSBasic::OpenStudioProgramProjector);
-	trayMenu->addAction(showHide);
-	trayMenu->addSeparator();
-	trayMenu->addMenu(previewProjector);
-	trayMenu->addMenu(studioProgramProjector);
-	trayMenu->addSeparator();
-	trayMenu->addAction(sysTrayStream);
-	trayMenu->addAction(sysTrayRecord);
-	trayMenu->addAction(sysTrayReplayBuffer);
-	trayMenu->addAction(sysTrayVirtualCam);
-	trayMenu->addSeparator();
-	trayMenu->addAction(exit);
-	trayIcon->setContextMenu(trayMenu);
-	trayIcon->show();
-
-	if (outputHandler && !outputHandler->replayBuffer)
-		sysTrayReplayBuffer->setEnabled(false);
-
-	sysTrayVirtualCam->setEnabled(vcamEnabled);
-
-	if (Active())
-		OnActivate(true);
-
-	connect(trayIcon.data(), &QSystemTrayIcon::activated, this,
-		&OBSBasic::IconActivated);
-	connect(showHide, &QAction::triggered, this, &OBSBasic::ToggleShowHide);
-	connect(sysTrayStream, &QAction::triggered, this,
-		&OBSBasic::StreamActionTriggered);
-	connect(sysTrayRecord, &QAction::triggered, this,
-		&OBSBasic::RecordActionTriggered);
-	connect(sysTrayReplayBuffer.data(), &QAction::triggered, this,
-		&OBSBasic::ReplayBufferActionTriggered);
-	connect(sysTrayVirtualCam.data(), &QAction::triggered, this,
-		&OBSBasic::VirtualCamActionTriggered);
-	connect(exit, &QAction::triggered, this, &OBSBasic::close);
 }
 
 void OBSBasic::IconActivated(QSystemTrayIcon::ActivationReason reason)
 {
-	// Refresh projector list
-	previewProjector->clear();
-	studioProgramProjector->clear();
-	AddProjectorMenuMonitors(previewProjector, this,
-				 &OBSBasic::OpenPreviewProjector);
-	AddProjectorMenuMonitors(studioProgramProjector, this,
-				 &OBSBasic::OpenStudioProgramProjector);
-
 #ifdef __APPLE__
 	UNUSED_PARAMETER(reason);
 #else
@@ -10166,62 +8469,19 @@ void OBSBasic::IconActivated(QSystemTrayIcon::ActivationReason reason)
 void OBSBasic::SysTrayNotify(const QString &text,
 			     QSystemTrayIcon::MessageIcon n)
 {
-	if (trayIcon && trayIcon->isVisible() &&
-	    QSystemTrayIcon::supportsMessages()) {
-		QSystemTrayIcon::MessageIcon icon =
-			QSystemTrayIcon::MessageIcon(n);
-		trayIcon->showMessage("OBS Studio", text, icon, 10000);
-	}
+	UNUSED_PARAMETER(text);
+	UNUSED_PARAMETER(n);
 }
 
 void OBSBasic::SystemTray(bool firstStarted)
 {
-	if (!QSystemTrayIcon::isSystemTrayAvailable())
-		return;
-	if (!trayIcon && !firstStarted)
-		return;
-
-	bool sysTrayWhenStarted = config_get_bool(
-		App()->GetUserConfig(), "BasicWindow", "SysTrayWhenStarted");
-	bool sysTrayEnabled = config_get_bool(App()->GetUserConfig(),
-					      "BasicWindow", "SysTrayEnabled");
-
-	if (firstStarted)
-		SystemTrayInit();
-
-	if (!sysTrayEnabled) {
-		trayIcon->hide();
-	} else {
-		trayIcon->show();
-		if (firstStarted && (sysTrayWhenStarted || opt_minimize_tray)) {
-			EnablePreviewDisplay(false);
-#ifdef __APPLE__
-			EnableOSXDockIcon(false);
-#endif
-			opt_minimize_tray = false;
-		}
-	}
-
-	if (isVisible())
-		showHide->setText(QTStr("Basic.SystemTray.Hide"));
-	else
-		showHide->setText(QTStr("Basic.SystemTray.Show"));
+	UNUSED_PARAMETER(firstStarted);
 }
 
 bool OBSBasic::sysTrayMinimizeToTray()
 {
 	return config_get_bool(App()->GetUserConfig(), "BasicWindow",
 			       "SysTrayMinimizeToTray");
-}
-
-void OBSBasic::on_actionMainUndo_triggered()
-{
-	undo_s.undo();
-}
-
-void OBSBasic::on_actionMainRedo_triggered()
-{
-	undo_s.redo();
 }
 
 void OBSBasic::on_actionCopySource_triggered()
@@ -10251,11 +8511,7 @@ void OBSBasic::on_actionCopySource_triggered()
 
 void OBSBasic::on_actionPasteRef_triggered()
 {
-	OBSSource scene_source = GetCurrentSceneSource();
-	OBSData undo_data = BackupScene(scene_source);
 	OBSScene scene = GetCurrentScene();
-
-	undo_s.push_disabled();
 
 	for (size_t i = clipboard.size(); i > 0; i--) {
 		SourceCopyInfo &copyInfo = clipboard[i - 1];
@@ -10274,37 +8530,14 @@ void OBSBasic::on_actionPasteRef_triggered()
 
 		OBSBasicSourceSelect::SourcePaste(copyInfo, false);
 	}
-
-	undo_s.pop_disabled();
-
-	QString action_name = QTStr("Undo.PasteSourceRef");
-	const char *scene_name = obs_source_get_name(scene_source);
-
-	OBSData redo_data = BackupScene(scene_source);
-	CreateSceneUndoRedoAction(action_name.arg(scene_name), undo_data,
-				  redo_data);
 }
 
 void OBSBasic::on_actionPasteDup_triggered()
 {
-	OBSSource scene_source = GetCurrentSceneSource();
-	OBSData undo_data = BackupScene(scene_source);
-
-	undo_s.push_disabled();
-
 	for (size_t i = clipboard.size(); i > 0; i--) {
 		SourceCopyInfo &copyInfo = clipboard[i - 1];
 		OBSBasicSourceSelect::SourcePaste(copyInfo, true);
 	}
-
-	undo_s.pop_disabled();
-
-	QString action_name = QTStr("Undo.PasteSource");
-	const char *scene_name = obs_source_get_name(scene_source);
-
-	OBSData redo_data = BackupScene(scene_source);
-	CreateSceneUndoRedoAction(action_name.arg(scene_name), undo_data,
-				  redo_data);
 }
 
 void OBSBasic::SourcePasteFilters(OBSSource source, OBSSource dstSource)
@@ -10312,19 +8545,7 @@ void OBSBasic::SourcePasteFilters(OBSSource source, OBSSource dstSource)
 	if (source == dstSource)
 		return;
 
-	OBSDataArrayAutoRelease undo_array =
-		obs_source_backup_filters(dstSource);
 	obs_source_copy_filters(dstSource, source);
-	OBSDataArrayAutoRelease redo_array =
-		obs_source_backup_filters(dstSource);
-
-	const char *srcName = obs_source_get_name(source);
-	const char *dstName = obs_source_get_name(dstSource);
-	QString text =
-		QTStr("Undo.Filters.Paste.Multiple").arg(srcName, dstName);
-
-	CreateFilterPasteUndoRedoAction(text, dstSource, undo_array,
-					redo_array);
 }
 
 void OBSBasic::AudioMixerCopyFilters()
@@ -10377,39 +8598,6 @@ void OBSBasic::on_actionCopyFilters_triggered()
 	copyFiltersSource = obs_source_get_weak_source(source);
 
 	ui->actionPasteFilters->setEnabled(true);
-}
-
-void OBSBasic::CreateFilterPasteUndoRedoAction(const QString &text,
-					       obs_source_t *source,
-					       obs_data_array_t *undo_array,
-					       obs_data_array_t *redo_array)
-{
-	auto undo_redo = [this](const std::string &json) {
-		OBSDataAutoRelease data =
-			obs_data_create_from_json(json.c_str());
-		OBSDataArrayAutoRelease array =
-			obs_data_get_array(data, "array");
-		OBSSourceAutoRelease source = obs_get_source_by_uuid(
-			obs_data_get_string(data, "uuid"));
-
-		obs_source_restore_filters(source, array);
-
-		if (filters)
-			filters->UpdateSource(source);
-	};
-
-	const char *uuid = obs_source_get_uuid(source);
-
-	OBSDataAutoRelease undo_data = obs_data_create();
-	OBSDataAutoRelease redo_data = obs_data_create();
-	obs_data_set_array(undo_data, "array", undo_array);
-	obs_data_set_array(redo_data, "array", redo_array);
-	obs_data_set_string(undo_data, "uuid", uuid);
-	obs_data_set_string(redo_data, "uuid", uuid);
-
-	undo_s.add_action(text, undo_redo, undo_redo,
-			  obs_data_get_json(undo_data),
-			  obs_data_get_json(redo_data));
 }
 
 void OBSBasic::on_actionPasteFilters_triggered()
@@ -10590,14 +8778,6 @@ SourceTreeItem *OBSBasic::GetItemWidgetFromSceneItem(obs_sceneitem_t *sceneItem)
 		return treeItem;
 
 	return nullptr;
-}
-
-void OBSBasic::on_autoConfigure_triggered()
-{
-	AutoConfig test(this);
-	test.setModal(true);
-	test.show();
-	test.exec();
 }
 
 void OBSBasic::on_stats_triggered()
@@ -10917,18 +9097,6 @@ void OBSBasic::PauseRecording()
 		ui->statusbar->RecordingPaused();
 
 		TaskbarOverlaySetStatus(TaskbarOverlayStatusPaused);
-		if (trayIcon && trayIcon->isVisible()) {
-#ifdef __APPLE__
-			QIcon trayIconFile =
-				QIcon(":/res/images/obs_paused_macos.svg");
-			trayIconFile.setIsMask(true);
-#else
-			QIcon trayIconFile =
-				QIcon(":/res/images/obs_paused.png");
-#endif
-			trayIcon->setIcon(QIcon::fromTheme("obs-tray-paused",
-							   trayIconFile));
-		}
 
 		OnEvent(OBS_FRONTEND_EVENT_RECORDING_PAUSED);
 
@@ -10954,18 +9122,6 @@ void OBSBasic::UnpauseRecording()
 		ui->statusbar->RecordingUnpaused();
 
 		TaskbarOverlaySetStatus(TaskbarOverlayStatusActive);
-		if (trayIcon && trayIcon->isVisible()) {
-#ifdef __APPLE__
-			QIcon trayIconFile =
-				QIcon(":/res/images/tray_active_macos.svg");
-			trayIconFile.setIsMask(true);
-#else
-			QIcon trayIconFile =
-				QIcon(":/res/images/tray_active.png");
-#endif
-			trayIcon->setIcon(QIcon::fromTheme("obs-tray-active",
-							   trayIconFile));
-		}
 
 		OnEvent(OBS_FRONTEND_EVENT_RECORDING_UNPAUSED);
 	}
@@ -11141,26 +9297,6 @@ void OBSBasic::on_OBSBasic_customContextMenuRequested(const QPoint &pos)
 	} else if (!className) {
 		ui->menuDocks->exec(globalPos);
 	}
-}
-
-void OBSBasic::UpdateProjectorHideCursor()
-{
-	for (size_t i = 0; i < projectors.size(); i++)
-		projectors[i]->SetHideCursor();
-}
-
-void OBSBasic::UpdateProjectorAlwaysOnTop(bool top)
-{
-	for (size_t i = 0; i < projectors.size(); i++)
-		SetAlwaysOnTop(projectors[i], top);
-}
-
-void OBSBasic::ResetProjectors()
-{
-	OBSDataArrayAutoRelease savedProjectorList = SaveProjectors();
-	ClearProjectors();
-	LoadSavedProjectors(savedProjectorList);
-	OpenSavedProjectors();
 }
 
 void OBSBasic::on_sourcePropertiesButton_clicked()

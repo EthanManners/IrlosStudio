@@ -42,7 +42,26 @@ target_sources(
     obs-ffmpeg.c
 )
 
-target_compile_options(obs-ffmpeg PRIVATE $<$<COMPILE_LANG_AND_ID:C,AppleClang,Clang>:-Wno-shorten-64-to-32>)
+target_compile_options(
+  obs-ffmpeg
+  PRIVATE
+    $<$<COMPILE_LANG_AND_ID:C,AppleClang,Clang>:-Wno-shorten-64-to-32>
+    # FFmpeg 7+ renamed FF_PROFILE_*/FF_LEVEL_* to AV_PROFILE_*/AV_LEVEL_*
+    # and deprecated direct codec field access. Suppress until upstream catches up.
+    $<$<COMPILE_LANGUAGE:C>:-Wno-deprecated-declarations>
+)
+# Compat shims for FFmpeg 7+ renamed profile/level macros
+target_compile_definitions(
+  obs-ffmpeg
+  PRIVATE
+    $<$<COMPILE_LANGUAGE:C>:FF_PROFILE_H264_CONSTRAINED_BASELINE=AV_PROFILE_H264_CONSTRAINED_BASELINE>
+    $<$<COMPILE_LANGUAGE:C>:FF_PROFILE_H264_MAIN=AV_PROFILE_H264_MAIN>
+    $<$<COMPILE_LANGUAGE:C>:FF_PROFILE_H264_HIGH=AV_PROFILE_H264_HIGH>
+    $<$<COMPILE_LANGUAGE:C>:FF_PROFILE_HEVC_MAIN=AV_PROFILE_HEVC_MAIN>
+    $<$<COMPILE_LANGUAGE:C>:FF_PROFILE_HEVC_MAIN_10=AV_PROFILE_HEVC_MAIN_10>
+    $<$<COMPILE_LANGUAGE:C>:FF_PROFILE_AV1_MAIN=AV_PROFILE_AV1_MAIN>
+    $<$<COMPILE_LANGUAGE:C>:FF_LEVEL_UNKNOWN=AV_LEVEL_UNKNOWN>
+)
 target_compile_definitions(
   obs-ffmpeg
   PRIVATE

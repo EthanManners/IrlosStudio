@@ -67,7 +67,7 @@ struct OBSStudioAPI : obs_frontend_callbacks {
 
 	void *obs_frontend_get_system_tray(void) override
 	{
-		return (void *)main->trayIcon.data();
+		return nullptr;
 	}
 
 	void obs_frontend_get_scenes(
@@ -471,16 +471,6 @@ struct OBSStudioAPI : obs_frontend_callbacks {
 
 	obs_output_t *obs_frontend_get_streaming_output(void) override
 	{
-		auto multitrackVideo =
-			main->outputHandler->multitrackVideo.get();
-		auto mtvOutput =
-			multitrackVideo
-				? obs_output_get_ref(
-					  multitrackVideo->StreamingOutput())
-				: nullptr;
-		if (mtvOutput)
-			return mtvOutput;
-
 		OBSOutput output = main->outputHandler->streamOutput.Get();
 		return obs_output_get_ref(output);
 	}
@@ -523,25 +513,10 @@ struct OBSStudioAPI : obs_frontend_callbacks {
 					 const char *geometry,
 					 const char *name) override
 	{
-		SavedProjectorInfo proj = {
-			ProjectorType::Preview,
-			monitor,
-			geometry ? geometry : "",
-			name ? name : "",
-		};
-		if (type) {
-			if (astrcmpi(type, "Source") == 0)
-				proj.type = ProjectorType::Source;
-			else if (astrcmpi(type, "Scene") == 0)
-				proj.type = ProjectorType::Scene;
-			else if (astrcmpi(type, "StudioProgram") == 0)
-				proj.type = ProjectorType::StudioProgram;
-			else if (astrcmpi(type, "Multiview") == 0)
-				proj.type = ProjectorType::Multiview;
-		}
-		QMetaObject::invokeMethod(main, "OpenSavedProjector",
-					  WaitConnection(),
-					  Q_ARG(SavedProjectorInfo *, &proj));
+		(void)type;
+		(void)monitor;
+		(void)geometry;
+		(void)name;
 	}
 
 	void obs_frontend_save(void) override { main->SaveProject(); }
@@ -768,11 +743,12 @@ struct OBSStudioAPI : obs_frontend_callbacks {
 					       const char *redo_data,
 					       bool repeatable) override
 	{
-		main->undo_s.add_action(
-			name,
-			[undo](const std::string &data) { undo(data.c_str()); },
-			[redo](const std::string &data) { redo(data.c_str()); },
-			undo_data, redo_data, repeatable);
+		(void)name;
+		(void)undo;
+		(void)redo;
+		(void)undo_data;
+		(void)redo_data;
+		(void)repeatable;
 	}
 
 	void on_load(obs_data_t *settings) override

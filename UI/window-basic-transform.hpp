@@ -19,8 +19,6 @@ private:
 	OBSSignal channelChangedSignal;
 	std::vector<OBSSignal> sigs;
 
-	std::string undo_data;
-
 	bool ignoreTransformSignal = false;
 	bool ignoreItemChange = false;
 

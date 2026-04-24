@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.28...3.30)
 find_package(Qt6 REQUIRED Widgets)
 
 if(OS_LINUX OR OS_FREEBSD OR OS_OPENBSD)
-  find_package(Qt6 REQUIRED Gui)
+  find_package(Qt6 REQUIRED Gui GuiPrivate)
   find_package(X11 REQUIRED)
 endif()
 
@@ -28,14 +28,6 @@ target_sources(
     $<$<PLATFORM_ID:Darwin>:auto-scene-switcher-osx.mm>
     $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:auto-scene-switcher-nix.cpp>
     $<$<PLATFORM_ID:Windows>:auto-scene-switcher-win.cpp>
-    $<$<PLATFORM_ID:Windows>:captions-handler.cpp>
-    $<$<PLATFORM_ID:Windows>:captions-handler.hpp>
-    $<$<PLATFORM_ID:Windows>:captions-mssapi-stream.cpp>
-    $<$<PLATFORM_ID:Windows>:captions-mssapi-stream.hpp>
-    $<$<PLATFORM_ID:Windows>:captions-mssapi.cpp>
-    $<$<PLATFORM_ID:Windows>:captions-mssapi.hpp>
-    $<$<PLATFORM_ID:Windows>:captions.cpp>
-    $<$<PLATFORM_ID:Windows>:captions.hpp>
     auto-scene-switcher.cpp
     auto-scene-switcher.hpp
     frontend-tools.c
@@ -46,7 +38,7 @@ target_sources(
 
 target_sources(
   frontend-tools
-  PRIVATE forms/auto-scene-switcher.ui forms/captions.ui forms/output-timer.ui forms/scripts.ui
+  PRIVATE forms/auto-scene-switcher.ui forms/output-timer.ui
 )
 
 target_compile_options(
@@ -68,13 +60,6 @@ target_link_libraries(
     $<$<PLATFORM_ID:Linux,FreeBSD,OpenBSD>:Qt::GuiPrivate>
 )
 
-add_subdirectory("${CMAKE_SOURCE_DIR}/shared/obs-scripting" "${CMAKE_BINARY_DIR}/shared/obs-scripting")
-
-if(ENABLE_SCRIPTING AND TARGET OBS::scripting)
-  target_sources(frontend-tools PRIVATE scripts.cpp scripts.hpp)
-  target_link_libraries(frontend-tools PRIVATE OBS::scripting)
-  target_enable_feature(frontend-tools "Scripting Support (Frontend)" ENABLE_SCRIPTING)
-endif()
 
 if(OS_WINDOWS)
   configure_file(cmake/windows/obs-module.rc.in frontend-tools.rc)

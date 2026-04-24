@@ -124,9 +124,6 @@ private:
 
 	void ProcessClick(const vec2 &pos);
 
-	OBSDataAutoRelease wrapper = nullptr;
-	bool changed;
-
 private slots:
 	void XScrollBarMoved(int value);
 	void YScrollBarMoved(int value);

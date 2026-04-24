@@ -41,7 +41,6 @@ target_link_libraries(
 include(cmake/ui-qt.cmake)
 include(cmake/ui-elements.cmake)
 include(cmake/ui-windows.cmake)
-include(cmake/feature-importers.cmake)
 include(cmake/feature-browserpanels.cmake)
 
 if(NOT OAUTH_BASE_URL)
@@ -49,9 +48,6 @@ if(NOT OAUTH_BASE_URL)
   mark_as_advanced(OAUTH_BASE_URL)
 endif()
 include(cmake/feature-twitch.cmake)
-include(cmake/feature-restream.cmake)
-include(cmake/feature-youtube.cmake)
-include(cmake/feature-whatsnew.cmake)
 
 add_subdirectory(frontend-plugins)
 
@@ -83,26 +79,10 @@ target_sources(
     platform.hpp
     qt-display.cpp
     qt-display.hpp
+    system-info.hpp
     ui-config.h
     ui-validation.cpp
     ui-validation.hpp
-)
-
-target_sources(
-  obs-studio
-  PRIVATE
-    goliveapi-censoredjson.cpp
-    goliveapi-censoredjson.hpp
-    goliveapi-network.cpp
-    goliveapi-network.hpp
-    goliveapi-postdata.cpp
-    goliveapi-postdata.hpp
-    models/multitrack-video.hpp
-    multitrack-video-error.cpp
-    multitrack-video-error.hpp
-    multitrack-video-output.cpp
-    multitrack-video-output.hpp
-    system-info.hpp
 )
 
 if(OS_WINDOWS)

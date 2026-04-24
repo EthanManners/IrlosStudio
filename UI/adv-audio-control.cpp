@@ -430,8 +430,6 @@ void OBSAdvAudioCtrl::SourceMixersChanged(uint32_t mixers)
 
 void OBSAdvAudioCtrl::volumeChanged(double db)
 {
-	float prev = obs_source_get_volume(source);
-
 	if (db < MIN_DB) {
 		volume->setSpecialValueText("-inf dB");
 		db = -INFINITY;
@@ -440,42 +438,14 @@ void OBSAdvAudioCtrl::volumeChanged(double db)
 	float val = obs_db_to_mul(db);
 	obs_source_set_volume(source, val);
 
-	auto undo_redo = [](const std::string &uuid, float val) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(uuid.c_str());
-		obs_source_set_volume(source, val);
-	};
-
-	const char *name = obs_source_get_name(source);
-	const char *uuid = obs_source_get_uuid(source);
-	OBSBasic *main = OBSBasic::Get();
-	main->undo_s.add_action(
-		QTStr("Undo.Volume.Change").arg(name),
-		std::bind(undo_redo, std::placeholders::_1, prev),
-		std::bind(undo_redo, std::placeholders::_1, val), uuid, uuid,
-		true);
 }
 
 void OBSAdvAudioCtrl::percentChanged(int percent)
 {
-	float prev = obs_source_get_volume(source);
 	float val = (float)percent / 100.0f;
 
 	obs_source_set_volume(source, val);
 
-	auto undo_redo = [](const std::string &uuid, float val) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(uuid.c_str());
-		obs_source_set_volume(source, val);
-	};
-
-	const char *name = obs_source_get_name(source);
-	const char *uuid = obs_source_get_uuid(source);
-	OBSBasic::Get()->undo_s.add_action(
-		QTStr("Undo.Volume.Change").arg(name),
-		std::bind(undo_redo, std::placeholders::_1, prev),
-		std::bind(undo_redo, std::placeholders::_1, val), uuid, uuid,
-		true);
 }
 
 static inline void set_mono(obs_source_t *source, bool mono)
@@ -503,25 +473,10 @@ void OBSAdvAudioCtrl::downmixMonoChanged(bool val)
 
 	obs_source_set_flags(source, flags);
 
-	auto undo_redo = [](const std::string &uuid, bool val) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(uuid.c_str());
-		set_mono(source, val);
-	};
-
-	QString text = QTStr(val ? "Undo.ForceMono.On" : "Undo.ForceMono.Off");
-
-	const char *name = obs_source_get_name(source);
-	const char *uuid = obs_source_get_uuid(source);
-	OBSBasic::Get()->undo_s.add_action(
-		text.arg(name),
-		std::bind(undo_redo, std::placeholders::_1, !val),
-		std::bind(undo_redo, std::placeholders::_1, val), uuid, uuid);
 }
 
 void OBSAdvAudioCtrl::balanceChanged(int val)
 {
-	float prev = obs_source_get_balance_value(source);
 	float bal = (float)val / 100.0f;
 
 	if (abs(50 - val) < 10) {
@@ -533,19 +488,6 @@ void OBSAdvAudioCtrl::balanceChanged(int val)
 
 	obs_source_set_balance_value(source, bal);
 
-	auto undo_redo = [](const std::string &uuid, float val) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(uuid.c_str());
-		obs_source_set_balance_value(source, val);
-	};
-
-	const char *name = obs_source_get_name(source);
-	const char *uuid = obs_source_get_uuid(source);
-	OBSBasic::Get()->undo_s.add_action(
-		QTStr("Undo.Balance.Change").arg(name),
-		std::bind(undo_redo, std::placeholders::_1, prev),
-		std::bind(undo_redo, std::placeholders::_1, bal), uuid, uuid,
-		true);
 }
 
 void OBSAdvAudioCtrl::ResetBalance()
@@ -563,25 +505,10 @@ void OBSAdvAudioCtrl::syncOffsetChanged(int milliseconds)
 
 	obs_source_set_sync_offset(source, val);
 
-	auto undo_redo = [](const std::string &uuid, int64_t val) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(uuid.c_str());
-		obs_source_set_sync_offset(source, val);
-	};
-
-	const char *name = obs_source_get_name(source);
-	const char *uuid = obs_source_get_uuid(source);
-	OBSBasic::Get()->undo_s.add_action(
-		QTStr("Undo.SyncOffset.Change").arg(name),
-		std::bind(undo_redo, std::placeholders::_1, prev),
-		std::bind(undo_redo, std::placeholders::_1, val), uuid, uuid,
-		true);
 }
 
 void OBSAdvAudioCtrl::monitoringTypeChanged(int index)
 {
-	obs_monitoring_type prev = obs_source_get_monitoring_type(source);
-
 	obs_monitoring_type mt =
 		(obs_monitoring_type)monitoringType->itemData(index).toInt();
 	obs_source_set_monitoring_type(source, mt);
@@ -604,17 +531,6 @@ void OBSAdvAudioCtrl::monitoringTypeChanged(int index)
 	blog(LOG_INFO, "User changed audio monitoring for source '%s' to: %s",
 	     name ? name : "(null)", type);
 
-	auto undo_redo = [](const std::string &uuid, obs_monitoring_type val) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(uuid.c_str());
-		obs_source_set_monitoring_type(source, val);
-	};
-
-	const char *uuid = obs_source_get_uuid(source);
-	OBSBasic::Get()->undo_s.add_action(
-		QTStr("Undo.MonitoringType.Change").arg(name),
-		std::bind(undo_redo, std::placeholders::_1, prev),
-		std::bind(undo_redo, std::placeholders::_1, mt), uuid, uuid);
 }
 
 static inline void setMixer(obs_source_t *source, const int mixerIdx,
@@ -630,19 +546,6 @@ static inline void setMixer(obs_source_t *source, const int mixerIdx,
 
 	obs_source_set_audio_mixers(source, new_mixers);
 
-	auto undo_redo = [](const std::string &uuid, uint32_t mixers) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(uuid.c_str());
-		obs_source_set_audio_mixers(source, mixers);
-	};
-
-	const char *name = obs_source_get_name(source);
-	const char *uuid = obs_source_get_uuid(source);
-	OBSBasic::Get()->undo_s.add_action(
-		QTStr("Undo.Mixers.Change").arg(name),
-		std::bind(undo_redo, std::placeholders::_1, mixers),
-		std::bind(undo_redo, std::placeholders::_1, new_mixers), uuid,
-		uuid);
 }
 
 void OBSAdvAudioCtrl::SetVolumeWidget(VolumeType type)

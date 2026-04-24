@@ -28,7 +28,6 @@
 #include <QFileDialog>
 #include <qt-wrappers.hpp>
 #include "window-basic-main.hpp"
-#include "window-basic-auto-config.hpp"
 #include "window-namedialog.hpp"
 
 // MARK: Constant Expressions
@@ -58,12 +57,7 @@ void OBSBasic::SetupNewProfile(const std::string &profileName, bool useWizard)
 	     newProfile.name.c_str(), newProfile.directoryName.c_str());
 	blog(LOG_INFO, "------------------------------------------------");
 
-	if (useWizard) {
-		AutoConfig wizard(this);
-		wizard.setModal(true);
-		wizard.show();
-		wizard.exec();
-	}
+	UNUSED_PARAMETER(useWizard);
 }
 
 void OBSBasic::SetupDuplicateProfile(const std::string &profileName)

@@ -143,7 +143,6 @@ void VolControl::MixersOrMonitoringChanged()
 void VolControl::SetMuted(bool)
 {
 	bool checked = mute->checkState() == Qt::Checked;
-	bool prev = obs_source_muted(source);
 	obs_source_set_muted(source, checked);
 	bool unassigned = IsSourceUnassigned(source);
 
@@ -156,46 +155,12 @@ void VolControl::SetMuted(bool)
 		if (!has_shown_warning)
 			ShowUnassignedWarning(obs_source_get_name(source));
 	}
-
-	auto undo_redo = [](const std::string &uuid, bool val) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(uuid.c_str());
-		obs_source_set_muted(source, val);
-	};
-
-	QString text =
-		QTStr(checked ? "Undo.Volume.Mute" : "Undo.Volume.Unmute");
-
-	const char *name = obs_source_get_name(source);
-	const char *uuid = obs_source_get_uuid(source);
-	OBSBasic::Get()->undo_s.add_action(
-		text.arg(name),
-		std::bind(undo_redo, std::placeholders::_1, prev),
-		std::bind(undo_redo, std::placeholders::_1, checked), uuid,
-		uuid);
 }
 
 void VolControl::SliderChanged(int vol)
 {
-	float prev = obs_source_get_volume(source);
-
 	obs_fader_set_deflection(obs_fader, float(vol) / FADER_PRECISION);
 	updateText();
-
-	auto undo_redo = [](const std::string &uuid, float val) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(uuid.c_str());
-		obs_source_set_volume(source, val);
-	};
-
-	float val = obs_source_get_volume(source);
-	const char *name = obs_source_get_name(source);
-	const char *uuid = obs_source_get_uuid(source);
-	OBSBasic::Get()->undo_s.add_action(
-		QTStr("Undo.Volume.Change").arg(name),
-		std::bind(undo_redo, std::placeholders::_1, prev),
-		std::bind(undo_redo, std::placeholders::_1, val), uuid, uuid,
-		true);
 }
 
 void VolControl::updateText()

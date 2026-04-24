@@ -1,5 +1,7 @@
 #pragma once
 
-#include "models/multitrack-video.hpp"
+namespace GoLiveApi {
+struct Capabilities {};
+} // namespace GoLiveApi
 
 void system_info(GoLiveApi::Capabilities &capabilities);

@@ -44,8 +44,6 @@ target_sources(
     focus-list.hpp
     horizontal-scroll-area.cpp
     horizontal-scroll-area.hpp
-    hotkey-edit.cpp
-    hotkey-edit.hpp
     item-widget-helpers.cpp
     item-widget-helpers.hpp
     lineedit-autoresize.cpp
@@ -69,8 +67,6 @@ target_sources(
     source-label.hpp
     source-tree.cpp
     source-tree.hpp
-    undo-stack-obs.cpp
-    undo-stack-obs.hpp
     url-push-button.cpp
     url-push-button.hpp
     visibility-item-widget.cpp

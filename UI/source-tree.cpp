@@ -128,34 +128,6 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 	/* --------------------------------------------------------- */
 
 	auto setItemVisible = [this](bool val) {
-		obs_scene_t *scene = obs_sceneitem_get_scene(sceneitem);
-		obs_source_t *scenesource = obs_scene_get_source(scene);
-		int64_t id = obs_sceneitem_get_id(sceneitem);
-		const char *name = obs_source_get_name(scenesource);
-		const char *uuid = obs_source_get_uuid(scenesource);
-		obs_source_t *source = obs_sceneitem_get_source(sceneitem);
-
-		auto undo_redo = [](const std::string &uuid, int64_t id,
-				    bool val) {
-			OBSSourceAutoRelease s =
-				obs_get_source_by_uuid(uuid.c_str());
-			obs_scene_t *sc = obs_group_or_scene_from_source(s);
-			obs_sceneitem_t *si =
-				obs_scene_find_sceneitem_by_id(sc, id);
-			if (si)
-				obs_sceneitem_set_visible(si, val);
-		};
-
-		QString str = QTStr(val ? "Undo.ShowSceneItem"
-					: "Undo.HideSceneItem");
-
-		OBSBasic *main = OBSBasic::Get();
-		main->undo_s.add_action(
-			str.arg(obs_source_get_name(source), name),
-			std::bind(undo_redo, std::placeholders::_1, id, !val),
-			std::bind(undo_redo, std::placeholders::_1, id, val),
-			uuid, uuid);
-
 		QSignalBlocker sourcesSignalBlocker(this);
 		obs_sceneitem_set_visible(sceneitem, val);
 	};
@@ -358,19 +330,6 @@ void SourceTreeItem::EnterEditMode()
 void SourceTreeItem::ExitEditMode(bool save)
 {
 	ExitEditModeInternal(save);
-
-	if (tree->undoSceneData) {
-		OBSBasic *main = OBSBasic::Get();
-		main->undo_s.pop_disabled();
-
-		OBSData redoSceneData = main->BackupScene(GetCurrentScene());
-
-		QString text = QTStr("Undo.GroupItems").arg(newName.c_str());
-		main->CreateSceneUndoRedoAction(text, tree->undoSceneData,
-						redoSceneData);
-
-		tree->undoSceneData = nullptr;
-	}
 }
 
 void SourceTreeItem::ExitEditModeInternal(bool save)
@@ -429,35 +388,6 @@ void SourceTreeItem::ExitEditModeInternal(bool save)
 	/* rename                                    */
 
 	QSignalBlocker sourcesSignalBlocker(this);
-	std::string prevName(obs_source_get_name(source));
-	std::string scene_uuid =
-		obs_source_get_uuid(main->GetCurrentSceneSource());
-	auto undo = [scene_uuid, prevName, main](const std::string &data) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(data.c_str());
-		obs_source_set_name(source, prevName.c_str());
-
-		OBSSourceAutoRelease scene_source =
-			obs_get_source_by_uuid(scene_uuid.c_str());
-		main->SetCurrentScene(scene_source.Get(), true);
-	};
-
-	std::string editedName = newName;
-
-	auto redo = [scene_uuid, main, editedName](const std::string &data) {
-		OBSSourceAutoRelease source =
-			obs_get_source_by_uuid(data.c_str());
-		obs_source_set_name(source, editedName.c_str());
-
-		OBSSourceAutoRelease scene_source =
-			obs_get_source_by_uuid(scene_uuid.c_str());
-		main->SetCurrentScene(scene_source.Get(), true);
-	};
-
-	const char *uuid = obs_source_get_uuid(source);
-	main->undo_s.add_action(QTStr("Undo.Rename").arg(newName.c_str()), undo,
-				redo, uuid, uuid);
-
 	obs_source_set_name(source, newName.c_str());
 }
 
@@ -911,7 +841,6 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 	if (indices.count() == 0)
 		return;
 
-	OBSBasic *main = OBSBasic::Get();
 	OBSScene scene = GetCurrentScene();
 	QString name = GetNewGroupName();
 
@@ -922,16 +851,11 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 		item_order << item;
 	}
 
-	st->undoSceneData = main->BackupScene(scene);
-
 	obs_sceneitem_t *item = obs_scene_insert_group(
 		scene, QT_TO_UTF8(name), item_order.data(), item_order.size());
 	if (!item) {
-		st->undoSceneData = nullptr;
 		return;
 	}
-
-	main->undo_s.push_disabled();
 
 	for (obs_sceneitem_t *item : item_order)
 		obs_sceneitem_select(item, false);
@@ -958,7 +882,6 @@ void SourceTreeModel::UngroupSelectedGroups(QModelIndexList &indices)
 		return;
 
 	OBSScene scene = main->GetCurrentScene();
-	OBSData undoData = main->BackupScene(scene);
 
 	for (int i = indices.count() - 1; i >= 0; i--) {
 		obs_sceneitem_t *item = items[indices[i].row()];
@@ -966,10 +889,6 @@ void SourceTreeModel::UngroupSelectedGroups(QModelIndexList &indices)
 	}
 
 	SceneChanged();
-
-	OBSData redoData = main->BackupScene(scene);
-	main->CreateSceneUndoRedoAction(QTStr("Basic.Main.Ungroup"), undoData,
-					redoData);
 }
 
 void SourceTreeModel::ExpandGroup(obs_sceneitem_t *item)
@@ -1146,10 +1065,7 @@ void SourceTree::dropEvent(QDropEvent *event)
 		return;
 	}
 
-	OBSBasic *main = OBSBasic::Get();
-
 	OBSScene scene = GetCurrentScene();
-	obs_source_t *scenesource = obs_scene_get_source(scene);
 	SourceTreeModel *stm = GetStm();
 	auto &items = stm->items;
 	QModelIndexList indices = selectedIndexes();
@@ -1245,19 +1161,6 @@ void SourceTree::dropEvent(QDropEvent *event)
 		QListView::dropEvent(event);
 		return;
 	}
-
-	/* --------------------------------------- */
-	/* save undo data                          */
-	std::vector<obs_source_t *> sources;
-	for (int i = 0; i < indices.size(); i++) {
-		obs_sceneitem_t *item = items[indices[i].row()];
-		if (obs_sceneitem_get_scene(item) != scene)
-			sources.push_back(obs_scene_get_source(
-				obs_sceneitem_get_scene(item)));
-	}
-	if (dropGroup)
-		sources.push_back(obs_sceneitem_get_source(dropGroup));
-	OBSData undo_data = main->BackupScene(scene, &sources);
 
 	/* --------------------------------------- */
 	/* if selection includes base group items, */
@@ -1422,18 +1325,6 @@ void SourceTree::dropEvent(QDropEvent *event)
 	ignoreReorder = false;
 
 	/* --------------------------------------- */
-	/* save redo data                          */
-
-	OBSData redo_data = main->BackupScene(scene, &sources);
-
-	/* --------------------------------------- */
-	/* add undo/redo action                    */
-
-	const char *scene_name = obs_source_get_name(scenesource);
-	QString action_name = QTStr("Undo.ReorderSources").arg(scene_name);
-	main->CreateSceneUndoRedoAction(action_name, undo_data, redo_data);
-
-	/* --------------------------------------- */
 	/* remove items if dropped in to collapsed */
 	/* group                                   */
 
@@ -1479,36 +1370,7 @@ void SourceTree::selectionChanged(const QItemSelection &selected,
 
 void SourceTree::NewGroupEdit(int row)
 {
-	if (!Edit(row)) {
-		OBSBasic *main = OBSBasic::Get();
-		main->undo_s.pop_disabled();
-
-		blog(LOG_WARNING, "Uh, somehow the edit didn't process, this "
-				  "code should never be reached.\nAnd by "
-				  "\"never be reached\", I mean that "
-				  "theoretically, it should be\nimpossible "
-				  "for this code to be reached. But if this "
-				  "code is reached,\nfeel free to laugh at "
-				  "Lain, because apparently it is, in fact, "
-				  "actually\npossible for this code to be "
-				  "reached. But I mean, again, theoretically\n"
-				  "it should be impossible. So if you see "
-				  "this in your log, just know that\nit's "
-				  "really dumb, and depressing. But at least "
-				  "the undo/redo action is\nstill covered, so "
-				  "in theory things *should* be fine. But "
-				  "it's entirely\npossible that they might "
-				  "not be exactly. But again, yea. This "
-				  "really\nshould not be possible.");
-
-		OBSData redoSceneData = main->BackupScene(GetCurrentScene());
-
-		QString text = QTStr("Undo.GroupItems").arg("Unknown");
-		main->CreateSceneUndoRedoAction(text, undoSceneData,
-						redoSceneData);
-
-		undoSceneData = nullptr;
-	}
+	Edit(row);
 }
 
 bool SourceTree::Edit(int row)

@@ -29,20 +29,14 @@
 #include <future>
 #include "window-main.hpp"
 #include "window-basic-interaction.hpp"
-#include "window-basic-vcam.hpp"
 #include "window-basic-properties.hpp"
 #include "window-basic-transform.hpp"
 #include "window-basic-adv-audio.hpp"
 #include "window-basic-filters.hpp"
 #include "window-missing-files.hpp"
-#include "window-projector.hpp"
 #include "window-basic-about.hpp"
-#ifdef YOUTUBE_ENABLED
-#include "window-dock-youtube-app.hpp"
-#endif
 #include "auth-base.hpp"
 #include "log-viewer.hpp"
-#include "undo-stack-obs.hpp"
 
 #include <obs-frontend-internal.hpp>
 
@@ -88,15 +82,6 @@ struct BasicOutputHandler;
 enum class QtDataRole {
 	OBSRef = Qt::UserRole,
 	OBSSignals,
-};
-
-struct SavedProjectorInfo {
-	ProjectorType type;
-	int monitor;
-	std::string geometry;
-	std::string name;
-	bool alwaysOnTop;
-	bool alwaysOnTopOverridden;
 };
 
 struct SourceCopyInfo {
@@ -216,18 +201,12 @@ class OBSBasic : public OBSMainWindow {
 	friend class OBSBasicStatusBar;
 	friend class OBSBasicSourceSelect;
 	friend class OBSBasicTransform;
-	friend class OBSBasicSettings;
 	friend class Auth;
-	friend class AutoConfig;
-	friend class AutoConfigStreamPage;
 	friend class RecordButton;
 	friend class ControlsSplitButton;
 	friend class ExtraBrowsersModel;
 	friend class ExtraBrowsersDelegate;
 	friend class DeviceCaptureToolbar;
-	friend class OBSBasicSourceSelect;
-	friend class OBSYoutubeActions;
-	friend class OBSPermissions;
 	friend struct BasicOutputHandler;
 	friend struct OBSStudioAPI;
 	friend class ScreenshotObj;
@@ -343,33 +322,13 @@ private:
 
 	ConfigFile activeConfiguration;
 
-	std::vector<SavedProjectorInfo *> savedProjectorsArray;
-	std::vector<OBSProjector *> projectors;
-
 	QPointer<QWidget> stats;
-	QPointer<QWidget> remux;
 	QPointer<QWidget> extraBrowsers;
-	QPointer<QWidget> importer;
 
 	QPointer<QPushButton> transitionButton;
 
 	bool vcamEnabled = false;
-	VCamConfig vcamConfig;
 
-	QScopedPointer<QSystemTrayIcon> trayIcon;
-	QPointer<QAction> sysTrayStream;
-	QPointer<QAction> sysTrayRecord;
-	QPointer<QAction> sysTrayReplayBuffer;
-	QPointer<QAction> sysTrayVirtualCam;
-	QPointer<QAction> showHide;
-	QPointer<QAction> exit;
-	QPointer<QMenu> trayMenu;
-	QPointer<QMenu> previewProjector;
-	QPointer<QMenu> studioProgramProjector;
-	QPointer<QMenu> previewProjectorSource;
-	QPointer<QMenu> previewProjectorMain;
-	QPointer<QMenu> sceneProjectorMenu;
-	QPointer<QMenu> sourceProjector;
 	QPointer<QMenu> scaleFilteringMenu;
 	QPointer<QMenu> blendingMethodMenu;
 	QPointer<QMenu> blendingModeMenu;
@@ -439,8 +398,6 @@ private:
 
 	bool QueryRemoveSource(obs_source_t *source);
 
-	void TimedCheckForUpdates();
-	void CheckForUpdates(bool manualUpdate);
 
 	void GetFPSCommon(uint32_t &num, uint32_t &den) const;
 	void GetFPSInteger(uint32_t &num, uint32_t &den) const;
@@ -460,12 +417,9 @@ private:
 
 	void CloseDialogs();
 	void ClearSceneData();
-	void ClearProjectors();
 
 	void Nudge(int dist, MoveDir dir);
 
-	OBSProjector *OpenProjector(obs_source_t *source, int monitor,
-				    ProjectorType type);
 
 	void GetAudioSourceFilters();
 	void GetAudioSourceProperties();
@@ -558,15 +512,6 @@ private:
 	inline void OnActivate(bool force = false);
 	inline void OnDeactivate();
 
-	void AddDropSource(const char *file, DropType image);
-	void AddDropURL(const char *url, QString &name, obs_data_t *settings,
-			const obs_video_info &ovi);
-	void ConfirmDropUrl(const QString &url);
-	void dragEnterEvent(QDragEnterEvent *event) override;
-	void dragLeaveEvent(QDragLeaveEvent *event) override;
-	void dragMoveEvent(QDragMoveEvent *event) override;
-	void dropEvent(QDropEvent *event) override;
-
 	bool sysTrayMinimizeToTray();
 
 	void EnumDialogs();
@@ -578,9 +523,6 @@ private:
 	QList<QPoint> visDlgPositions;
 
 	QByteArray startingDockLayout;
-
-	obs_data_array_t *SaveProjectors();
-	void LoadSavedProjectors(obs_data_array_t *savedProjectors);
 
 	void MacBranchesFetched(const QString &branch, bool manualUpdate);
 	void ReceivedIntroJson(const QString &text);
@@ -647,9 +589,6 @@ private:
 	OBSSource GetOverrideTransition(OBSSource source);
 	int GetOverrideTransitionDuration(OBSSource source);
 
-	void UpdateProjectorHideCursor();
-	void UpdateProjectorAlwaysOnTop(bool top);
-	void ResetProjectors();
 
 	QPointer<QObject> screenshotData;
 
@@ -660,17 +599,6 @@ private:
 	bool autoStopBroadcast = true;
 	bool broadcastActive = false;
 	bool broadcastReady = false;
-	QPointer<QThread> youtubeStreamCheckThread;
-#ifdef YOUTUBE_ENABLED
-	void YoutubeStreamCheck(const std::string &key);
-	void ShowYouTubeAutoStartWarning();
-	void YouTubeActionDialogOk(const QString &broadcast_id,
-				   const QString &stream_id, const QString &key,
-				   bool autostart, bool autostop,
-				   bool start_now);
-#endif
-	void BroadcastButtonClicked();
-	void SetBroadcastFlowEnabled(bool enabled);
 
 	void UpdatePreviewSafeAreas();
 	bool drawSafeAreas = false;
@@ -702,8 +630,6 @@ private:
 	bool recordingStarted = false;
 	bool isRecordingPausable = false;
 	bool recordingPaused = false;
-
-	bool restartingVCam = false;
 
 public slots:
 	void DeferSaveBegin();
@@ -770,9 +696,6 @@ public slots:
 	void UpdateEditMenu();
 
 private slots:
-
-	void on_actionMainUndo_triggered();
-	void on_actionMainRedo_triggered();
 
 	void AddSceneItem(OBSSceneItem item);
 	void AddScene(OBSSource source);
@@ -852,7 +775,6 @@ private slots:
 	void ScenePasteFilters();
 
 	void CheckDiskSpaceRemaining();
-	void OpenSavedProjector(SavedProjectorInfo *info);
 
 	void ResetStatsHotkey();
 
@@ -878,9 +800,6 @@ private slots:
 
 	void LockVolumeControl(bool lock);
 
-	void UpdateVirtualCamConfig(const VCamConfig &config);
-	void RestartVirtualCam(const VCamConfig &config);
-	void RestartingVirtualCam();
 
 private:
 	/* OBS Callbacks */
@@ -904,8 +823,6 @@ private:
 	void copyActionsDynamicProperties();
 
 	static void HotkeyTriggered(void *data, obs_hotkey_id id, bool pressed);
-
-	void AutoRemux(QString input, bool no_show = false);
 
 	void UpdateIsRecordingPausable();
 
@@ -1005,8 +922,6 @@ public:
 	void SystemTrayInit();
 	void SystemTray(bool firstStarted);
 
-	void OpenSavedProjectors();
-
 	void CreateInteractionWindow(obs_source_t *source);
 	void CreatePropertiesWindow(obs_source_t *source);
 	void CreateFiltersWindow(obs_source_t *source);
@@ -1023,21 +938,6 @@ public:
 
 	const char *GetCurrentOutputPath();
 
-	void DeleteProjector(OBSProjector *projector);
-
-	static QList<QString> GetProjectorMenuMonitorsFormatted();
-	template<typename Receiver, typename... Args>
-	static void AddProjectorMenuMonitors(QMenu *parent, Receiver *target,
-					     void (Receiver::*slot)(Args...))
-	{
-		auto projectors = GetProjectorMenuMonitorsFormatted();
-		for (int i = 0; i < projectors.size(); i++) {
-			QString str = projectors[i];
-			QAction *action = parent->addAction(str, target, slot);
-			action->setProperty("monitor", i);
-		}
-	}
-
 	QIcon GetSourceIcon(const char *id) const;
 	QIcon GetGroupIcon() const;
 	QIcon GetSceneIcon() const;
@@ -1045,25 +945,6 @@ public:
 	OBSWeakSource copyFilter;
 
 	void ShowStatusBarMessage(const QString &message);
-
-	static OBSData
-	BackupScene(obs_scene_t *scene,
-		    std::vector<obs_source_t *> *sources = nullptr);
-	void CreateSceneUndoRedoAction(const QString &action_name,
-				       OBSData undo_data, OBSData redo_data);
-
-	static inline OBSData
-	BackupScene(obs_source_t *scene_source,
-		    std::vector<obs_source_t *> *sources = nullptr)
-	{
-		obs_scene_t *scene = obs_scene_from_source(scene_source);
-		return BackupScene(scene, sources);
-	}
-
-	void CreateFilterPasteUndoRedoAction(const QString &text,
-					     obs_source_t *source,
-					     obs_data_array_t *undo_array,
-					     obs_data_array_t *redo_array);
 
 	void SetDisplayAffinity(QWindow *window);
 
@@ -1079,10 +960,6 @@ protected:
 private slots:
 	void on_actionFullscreenInterface_triggered();
 
-	void on_actionShow_Recordings_triggered();
-	void on_actionRemux_triggered();
-	void on_action_Settings_triggered();
-	void on_actionShowMacPermissions_triggered();
 	void on_actionShowMissingFiles_triggered();
 	void on_actionAdvAudioProperties_triggered();
 	void on_actionMixerToolbarAdvAudio_triggered();
@@ -1091,14 +968,6 @@ private slots:
 	void on_actionUploadCurrentLog_triggered();
 	void on_actionUploadLastLog_triggered();
 	void on_actionViewCurrentLog_triggered();
-	void on_actionCheckForUpdates_triggered();
-	void on_actionRepair_triggered();
-	void on_actionShowWhatsNew_triggered();
-	void on_actionRestartSafe_triggered();
-
-	void on_actionShowCrashLogs_triggered();
-	void on_actionUploadLastCrashLog_triggered();
-
 	void on_actionEditTransform_triggered();
 	void on_actionCopyTransform_triggered();
 	void on_actionPasteTransform_triggered();
@@ -1155,14 +1024,9 @@ private slots:
 	void on_actionHelpPortal_triggered();
 	void on_actionWebsite_triggered();
 	void on_actionDiscord_triggered();
-	void on_actionReleaseNotes_triggered();
-
 	void on_preview_customContextMenuRequested();
 	void ProgramViewContextMenuRequested();
 	void on_previewDisabledWidget_customContextMenuRequested();
-
-	void on_actionShowSettingsFolder_triggered();
-	void on_actionShowProfileFolder_triggered();
 
 	void on_actionAlwaysOnTop_triggered();
 
@@ -1185,20 +1049,14 @@ private slots:
 	void on_sourceFiltersButton_clicked();
 	void on_sourceInteractButton_clicked();
 
-	void on_autoConfigure_triggered();
 	void on_stats_triggered();
 
 	void on_resetUI_triggered();
 	void on_resetDocks_triggered(bool force = false);
 	void on_lockDocks_toggled(bool lock);
-	void on_multiviewProjectorWindowed_triggered();
 	void on_sideDocks_toggled(bool side);
 
 	void logUploadFinished(const QString &text, const QString &error);
-	void crashUploadFinished(const QString &text, const QString &error);
-	void openLogDialog(const QString &text, const bool crash);
-
-	void updateCheckFinished();
 
 	void MoveSceneToTop();
 	void MoveSceneToBottom();
@@ -1315,10 +1173,6 @@ private:
 	QPointer<OBSDock> controlsDock;
 
 public:
-	/* `undo_s` needs to be declared after `ui` to prevent an uninitialized
-	 * warning for `ui` while initializing `undo_s`. */
-	undo_stack undo_s;
-
 	explicit OBSBasic(QWidget *parent = 0);
 	virtual ~OBSBasic();
 
