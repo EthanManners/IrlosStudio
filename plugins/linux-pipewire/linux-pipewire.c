@@ -24,7 +24,6 @@
 #include <glad/glad.h>
 
 #include <pipewire/pipewire.h>
-#include "screencast-portal.h"
 
 #if PW_CHECK_VERSION(0, 3, 60)
 #include "camera-portal.h"
@@ -49,15 +48,11 @@ bool obs_module_load(void)
 	camera_portal_load();
 #endif
 
-	screencast_portal_load();
-
 	return true;
 }
 
 void obs_module_unload(void)
 {
-	screencast_portal_unload();
-
 #if PW_CHECK_VERSION(0, 3, 60)
 	camera_portal_unload();
 #endif

@@ -31,29 +31,12 @@ macro(check_obs_websocket)
 endmacro()
 
 # Add plugins in alphabetical order to retain order in IDE projects
-add_obs_plugin(
-    aja
-    PLATFORMS WINDOWS MACOS LINUX
-    WITH_MESSAGE
-)
-add_obs_plugin(coreaudio-encoder PLATFORMS WINDOWS MACOS)
-add_obs_plugin(
-    decklink
-    PLATFORMS WINDOWS MACOS LINUX
-    WITH_MESSAGE
-)
+# IrlosStudio: aja, decklink, linux-capture, linux-v4l2, obs-vst, sndio, vlc-video stripped
 add_obs_plugin(image-source)
 add_obs_plugin(linux-alsa PLATFORMS LINUX FREEBSD OPENBSD)
-add_obs_plugin(linux-capture PLATFORMS LINUX FREEBSD OPENBSD)
 add_obs_plugin(linux-jack PLATFORMS LINUX FREEBSD OPENBSD)
 add_obs_plugin(linux-pipewire PLATFORMS LINUX FREEBSD OPENBSD)
 add_obs_plugin(linux-pulseaudio PLATFORMS LINUX FREEBSD OPENBSD)
-add_obs_plugin(linux-v4l2 PLATFORMS LINUX FREEBSD OPENBSD)
-add_obs_plugin(mac-avcapture PLATFORMS MACOS)
-add_obs_plugin(mac-capture PLATFORMS MACOS)
-add_obs_plugin(mac-syphon PLATFORMS MACOS)
-add_obs_plugin(mac-videotoolbox PLATFORMS MACOS)
-add_obs_plugin(mac-virtualcam PLATFORMS MACOS)
 add_obs_plugin(nv-filters PLATFORMS WINDOWS)
 
 check_obs_browser()
@@ -68,23 +51,11 @@ add_obs_plugin(
     PLATFORMS WINDOWS LINUX
     ARCHITECTURES x64 x86_64
 )
-add_obs_plugin(obs-text PLATFORMS WINDOWS)
 add_obs_plugin(obs-transitions)
-add_obs_plugin(
-    obs-vst
-    PLATFORMS WINDOWS MACOS LINUX
-    WITH_MESSAGE
-)
 add_obs_plugin(obs-webrtc)
 
 check_obs_websocket()
 
 add_obs_plugin(obs-x264)
-add_obs_plugin(oss-audio PLATFORMS FREEBSD OPENBSD)
 add_obs_plugin(rtmp-services)
-add_obs_plugin(sndio PLATFORMS LINUX FREEBSD OPENBSD)
 add_obs_plugin(text-freetype2)
-add_obs_plugin(vlc-video WITH_MESSAGE)
-add_obs_plugin(win-capture PLATFORMS WINDOWS)
-add_obs_plugin(win-dshow PLATFORMS WINDOWS)
-add_obs_plugin(win-wasapi PLATFORMS WINDOWS)

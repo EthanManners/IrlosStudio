@@ -320,6 +320,7 @@ OBSBasic::OBSBasic(QWidget *parent)
 	api = InitializeAPIInterface(this);
 
 	ui->setupUi(this);
+	ui->menubar->hide();
 	ui->previewDisabledWidget->setVisible(false);
 
 	/* Set up streaming connections */

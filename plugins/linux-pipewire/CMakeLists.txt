@@ -33,8 +33,6 @@ target_sources(
     pipewire.h
     portal.c
     portal.h
-    screencast-portal.c
-    screencast-portal.h
 )
 
 target_include_directories(linux-pipewire PRIVATE ${libdrm_include_directories})

@@ -954,48 +954,9 @@ bool OBSApp::InitTheme()
 	/* Load list of themes and read their metadata */
 	FindThemes();
 
-	if (config_get_bool(userConfig, "Appearance", "AutoReload")) {
-		/* Set up Qt file watcher to automatically reload themes */
-		themeWatcher = new QFileSystemWatcher(this);
-		connect(themeWatcher.get(), &QFileSystemWatcher::fileChanged,
-			this, &OBSApp::themeFileChanged);
-	}
-
-	/* Migrate old theme config key */
-	if (config_has_user_value(userConfig, "General", "CurrentTheme3") &&
-	    !config_has_user_value(userConfig, "Appearance", "Theme")) {
-		const char *old = config_get_string(userConfig, "General",
-						    "CurrentTheme3");
-
-		if (themeMigrations.count(old)) {
-			config_set_string(userConfig, "Appearance", "Theme",
-					  themeMigrations[old].c_str());
-		}
-	}
-
-	QString themeName =
-		config_get_string(userConfig, "Appearance", "Theme");
-
-	if (themeName.isEmpty() || !GetTheme(themeName)) {
-		if (!themeName.isEmpty()) {
-			blog(LOG_WARNING,
-			     "Loading theme \"%s\" failed, falling back to "
-			     "default theme (\"%s\").",
-			     QT_TO_UTF8(themeName), DEFAULT_THEME);
-		}
-#ifdef _WIN32
-		themeName = HighContrastEnabled() ? "com.obsproject.System"
-						  : DEFAULT_THEME;
-#else
-		themeName = DEFAULT_THEME;
-#endif
-	}
-
-	if (!SetTheme(themeName)) {
-		blog(LOG_ERROR,
-		     "Loading default theme \"%s\" failed, falling back to "
-		     "system theme as last resort.",
-		     QT_TO_UTF8(themeName));
+	/* IrlosStudio: always use the bundled Yami theme */
+	if (!SetTheme(DEFAULT_THEME)) {
+		blog(LOG_ERROR, "Failed to load Yami theme, falling back to system theme.");
 		return SetTheme("com.obsproject.System");
 	}
 
