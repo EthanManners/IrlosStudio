@@ -43,26 +43,9 @@ OBSBasicControls::OBSBasicControls(OBSBasic *main)
 		[this]() { emit this->SaveReplayBufferButtonClicked(); },
 		Qt::DirectConnection);
 	connect(
-		ui->virtualCamButton, &QPushButton::clicked, this,
-		[this]() { emit this->VirtualCamButtonClicked(); },
-		Qt::DirectConnection);
-	connect(
-		ui->virtualCamConfigButton, &QPushButton::clicked, this,
-		[this]() { emit this->VirtualCamConfigButtonClicked(); },
-		Qt::DirectConnection);
-	connect(
 		ui->modeSwitch, &QPushButton::clicked, this,
 		[this]() { emit this->StudioModeButtonClicked(); },
 		Qt::DirectConnection);
-	connect(
-		ui->settingsButton, &QPushButton::clicked, this,
-		[this]() { emit this->SettingsButtonClicked(); },
-		Qt::DirectConnection);
-	connect(
-		ui->exitButton, &QPushButton::clicked, this,
-		[this]() { emit this->ExitButtonClicked(); },
-		Qt::DirectConnection);
-
 	/* Transfer menu actions signals as OBSBasicControls signals */
 	connect(
 		startStreamAction.get(), &QAction::triggered, this,
@@ -82,9 +65,6 @@ OBSBasicControls::OBSBasicControls(OBSBasic *main)
 	ui->pauseRecordButton->setVisible(false);
 	ui->replayBufferButton->setVisible(false);
 	ui->saveReplayButton->setVisible(false);
-	ui->virtualCamButton->setVisible(false);
-	ui->virtualCamConfigButton->setVisible(false);
-
 	/* Set up state update connections */
 	connect(main, &OBSBasic::StreamingPreparing, this,
 		&OBSBasicControls::StreamingPreparing);
@@ -288,17 +268,9 @@ void OBSBasicControls::ReplayBufferStopped()
 	ui->saveReplayButton->setVisible(false);
 }
 
-void OBSBasicControls::VirtualCamStarted()
-{
-	ui->virtualCamButton->setChecked(true);
-	ui->virtualCamButton->setText(QTStr("Basic.Main.StopVirtualCam"));
-}
+void OBSBasicControls::VirtualCamStarted() {}
 
-void OBSBasicControls::VirtualCamStopped()
-{
-	ui->virtualCamButton->setChecked(false);
-	ui->virtualCamButton->setText(QTStr("Basic.Main.StartVirtualCam"));
-}
+void OBSBasicControls::VirtualCamStopped() {}
 
 void OBSBasicControls::UpdateStudioModeState(bool enabled)
 {
@@ -322,8 +294,4 @@ void OBSBasicControls::EnableReplayBufferButtons(bool enabled)
 	ui->replayBufferButton->setVisible(enabled);
 }
 
-void OBSBasicControls::EnableVirtualCamButtons()
-{
-	ui->virtualCamButton->setVisible(true);
-	ui->virtualCamConfigButton->setVisible(true);
-}
+void OBSBasicControls::EnableVirtualCamButtons() {}

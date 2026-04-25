@@ -60,11 +60,7 @@ signals:
 	void PauseRecordButtonClicked();
 	void ReplayBufferButtonClicked();
 	void SaveReplayBufferButtonClicked();
-	void VirtualCamButtonClicked();
-	void VirtualCamConfigButtonClicked();
 	void StudioModeButtonClicked();
-	void SettingsButtonClicked();
-	void ExitButtonClicked();
 
 	void StartStreamMenuActionClicked();
 	void StopStreamMenuActionClicked();

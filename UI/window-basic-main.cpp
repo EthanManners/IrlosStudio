@@ -390,16 +390,8 @@ OBSBasic::OBSBasic(QWidget *parent)
 	connect(controls, &OBSBasicControls::SaveReplayBufferButtonClicked,
 		this, &OBSBasic::ReplayBufferSave);
 
-	connect(controls, &OBSBasicControls::VirtualCamButtonClicked, this,
-		&OBSBasic::VirtualCamActionTriggered);
-	connect(controls, &OBSBasicControls::VirtualCamConfigButtonClicked,
-		this, &OBSBasic::OpenVirtualCamConfig);
-
 	connect(controls, &OBSBasicControls::StudioModeButtonClicked, this,
 		&OBSBasic::TogglePreviewProgramMode);
-
-	connect(controls, &OBSBasicControls::ExitButtonClicked, this,
-		&QMainWindow::close);
 
 	startingDockLayout = saveState();
 
@@ -8074,11 +8066,11 @@ void OBSBasic::UpdateTitleBar()
 	const char *sceneCollection = config_get_string(
 		App()->GetUserConfig(), "Basic", "SceneCollection");
 
-	name << "OBS ";
+	name << "IrlosStudio";
 	if (previewProgramMode)
-		name << "Studio ";
+		name << " [Studio Mode]";
 
-	name << App()->GetVersionString(false);
+	name << " " << App()->GetVersionString(false);
 	if (safe_mode)
 		name << " (" << Str("TitleBar.SafeMode") << ")";
 	if (App()->IsPortableMode())
