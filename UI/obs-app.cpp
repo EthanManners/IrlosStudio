@@ -68,9 +68,6 @@
 #include <unistd.h>
 #endif
 
-#if defined(_WIN32) || defined(ENABLE_SPARKLE_UPDATER)
-#include "update/models/branches.hpp"
-#endif
 
 #if !defined(_WIN32) && !defined(__APPLE__)
 #include <obs-nix-platform.h>

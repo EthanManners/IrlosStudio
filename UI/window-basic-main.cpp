@@ -65,21 +65,7 @@
 #include <sstream>
 
 #ifdef _WIN32
-#include "update/win-update.hpp"
-#include "update/shared-update.hpp"
 #include "windows.h"
-#endif
-
-#ifdef WHATSNEW_ENABLED
-#include "update/models/whatsnew.hpp"
-#endif
-
-#if !defined(_WIN32) && defined(WHATSNEW_ENABLED)
-#include "update/shared-update.hpp"
-#endif
-
-#ifdef ENABLE_SPARKLE_UPDATER
-#include "update/mac-update.hpp"
 #endif
 
 #include "ui_OBSBasic.h"
