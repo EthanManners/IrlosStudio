@@ -1,0 +1,135 @@
+# Irlos Control Protocol
+#### GPL-3.0
+#### Author: Ethan Manners
+#### Version: 1.0
+#### Status: Draft
+#### Transport: Unix domain socket
+#### Encoding: Length-prefixed UTF-8 JSON
+
+## 1. Overview
+
+The IRLOS Control Protocol (ICP) is the wire protocol spoken between `irlosd` (the IRLOS control daemon) and the `irlos-control` plugin loaded into IrlosStudio. ICP exists to give `irlosd` programmatic control over IrlosStudio's scene state and streaming state without requiring a network-facing remote-control interface.
+
+ICP replaces the use of obs-websocket in this deployment. Where obs-websocket exposes the entire OBS feature set over an authenticated WebSocket server suitable for remote clients, ICP exposes a fixed set of 8 operations over a local Unix socket between two cooperating processes on the same host. The protocol is intentionally minimal: there is no event subsystem, no authentication handshake (filesystem permissions on the socket are the access control), no request multiplexing, and no support for clients other than `irlosd`.
+
+ICP is not a general-purpose OBS remote control. Programs that need broader OBS access should use obs-websocket.
+
+## 2. Transport
+
+ICP runs over a Unix domain socket of type `SOCK_STREAM` (TCP)
+The socket is created by the `irlos-control` plugin when it loads inside IrlosStudio, and is removed when the plugin unloads.
+
+#### Unix socket location: /run/irlos/obs-control.sock
+Parent directory `/run/irlos/` is created by systemd via a tmpfiles.d configuration shipped with IRLOS
+The default socket path is `/run/irlos/obs-control.sock`. The plugin reads its socket path from its OBS plugin configuration; the client reads its target socket path from `irlosd`'s configuration. Deployments running inside multiple IrlosStudio instances on a single host MUST configure each instance with a distinct path. The recommended convention for multi-instance deployments is `/run/irlos/<instance-name>/obs-control.sock`
+
+
+#### Permissions:
+Socket file is owned by `root:irlos` with mode `0660`
+Owner: `root` (read/write)
+Group: `irlos` (read/write)
+Other: no access
+
+The `irlos` group is created by the IRLOS package install scripts. Both `irlosd` and `IrlosStudio` run as members of this group. `irlosd` runs as root, `IrlosStudio` runs as the underprivileged user `irlosstudio`
+
+No process outside the `irlos` group can connect to the socket. The protocol does not implement application-layer authentication. The kernel's filesystem permissions are the sole access control mechanism.
+
+
+#### Connection Model:
+The plugin accepts at most one client connection at a time. While a client is connected, additional connection attempts are rejected at the protocol layer (See S6 Handshake) with an error response, after which the plugin closes the new connection.
+
+Clients (`irlosd`) are expected to maintain a single long-lived connection for the lifetime of the daemon. Reconnection on failure is the client's responsibility.
+
+The plugin does not initiate connections. All connections are established by the client (`irlosd`) and accepted by the plugin.
+
+
+#### Socket lifecycle:
+Socket gets created on plugin load and removed on plugin unload. If the plugin crashes or is killed, a stale socket file may remain. The plugin must `unlink()` any pre-existing socket file at the configured path before `bind()` on plugin load.
+
+The plugin does not attempt to verify whether a stale socket has an active listener before removing it. This is safe under the single-instance assumption: only one IrlosStudio runs at a time per socket.
+
+
+
+## 3. Framing
+
+ICP messages are framed using a 4-byte length prefix followed by a UTF-8 JSON payload.
+
+#### Wire format
+Each message on the wire consists of:
+`[4 bytes: length]  [N bytes: payload]`
+
+The length field is an unsigned 32-bit integer in network byte order (big-endian). It specifies the size of the payload in bytes, not including the length field itself.
+
+The payload is a UTF-8 encoded JSON document. The payload MUST be JSON object (not an array, string, number, or other JSON type at the top level).
+
+#### Length constraints
+The maximum payload size is 16384 bytes (16KiB). A length value greater than this MUST cause the receiver to close the connection without reading further. The receiver SHOULD log the violation, but MUST NOT send a response. By definition, a sender that violates the length cap is either malfunctioning or hostile, and engaging in further is unsafe.
+
+The minimum payload size is 2 bytes (the smallest valid JSON object: `{}`). A length value less than 2 MUST cause the receiver to close the connection.
+
+
+#### Reading a message
+To read one message, the receiver:
+
+1. Reads exactly 4 bytes from the socket. These are the length prefix.
+2. Interprets the 4 bytes as a big-endian uint32. Call this value `N`.
+3. If `N > 16384` or `N < 2`, closes the connection.
+4. Reads exactly `N` bytes from the socket. These are the payload.
+5. Validates the payload as UTF-8 and parses it as JSON. If either validation fails, closes the connection.
+6. Validates that the parsed JSON is an object. If not, closes the connection.
+
+The receiver MUST NOT begin processing the next message until the current message has been fully read and parsed. There is no read-ahead, no buffered parsing, no message coalescing.
+
+
+#### Writing a message
+To write one message, the sender:
+
+1. Serializes the message body to UTF-8 JSON.
+2. Verifies the byte length of the JSON does not exceed 16384. If it does, the sender has a bug. It MUST NOT truncate or split the message. It MUST log the error and refuse to send.
+3. Writes 4 bytes containing the byte length as a big-endian uint32.
+4. Write the JSON bytes.
+
+The sender SHOULD use a single `write(2)` syscall for the combined length+payload buffer where possible, but the protocol does not require it. Receivers MUST handle messages that arrive split across multiple TCP-level (i.e. socket-level) reads, since the kernel may deliver bytes in arbitrary chunks regardless of how they were sent.
+
+
+## 4. Encoding
+
+UTF-8 JSON
+JSON Dialect:
+
+
+## 5. Handshake
+
+
+
+## 6. Request/Response model
+
+Synchronous, one at a time response format
+
+
+## 7. Error format
+
+
+
+## 8. Operations
+
+1. Switch to a named scene
+2. Get current scene
+3. Get list of scenes (for validation at startup)
+4. Start streaming
+5. Stop streaming
+6. Get streaming state
+7. Start recording
+8. Stop recording
+
+
+
+## 9. Conection lifecycle
+
+
+
+## 10. Versioning Policy
+
+
+
+
