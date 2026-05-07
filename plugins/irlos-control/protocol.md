@@ -16,7 +16,7 @@ ICP is not a general-purpose OBS remote control. Programs that need broader OBS 
 
 ## 2. Transport
 
-ICP runs over a Unix domain socket of type `SOCK_STREAM` (TCP)
+ICP runs over a Unix domain socket of type `SOCK_STREAM` (TCP-like)
 The socket is created by the `irlos-control` plugin when it loads inside IrlosStudio, and is removed when the plugin unloads.
 
 #### Unix socket location: /run/irlos/obs-control.sock
@@ -90,6 +90,17 @@ To write one message, the sender:
 4. Write the JSON bytes.
 
 The sender SHOULD use a single `write(2)` syscall for the combined length+payload buffer where possible, but the protocol does not require it. Receivers MUST handle messages that arrive split across multiple TCP-level (i.e. socket-level) reads, since the kernel may deliver bytes in arbitrary chunks regardless of how they were sent.
+
+#### What ICP does not support
+ICP framing has no message types at the framing layer, no checksums, no compression, and no chunking. These are deliberate omissions:
+
+- No message types: All messages are JSON objects. The type/operation is encoded inside the JSON (the `op` field, defined in S8). The framing layer is uniform
+
+- No checksums: The transport is a Unix socket on the same host; the kernel's IPC mechanisms do not introduce bit errors. Checksumming would be wasted work.
+
+- No compression: Messages are small (<16KiB) and on the same host. Compression overhead exceeds streaming
+
+- No chunking: Messages either fit in 16KiB or they don't. If a future operation needs to transfer more data than fits, it should be redesigned (or use a different mechanism entirely) rather than bolted onto the framing layer.
 
 
 ## 4. Encoding
