@@ -105,9 +105,46 @@ ICP framing has no message types at the framing layer, no checksums, no compress
 
 ## 4. Encoding
 
-UTF-8 JSON
-JSON Dialect:
+ICP message payloads are UTF-8 encoded JSON documents conforming to RFC 8259.
 
+#### JSON dialect
+ICP uses strict JSON. Specifically:
+
+- No comments. Neither `//` line comments nor `/* */` block comments are permitted.
+- No trailing commas in objects or arrays.
+- No unquoted keys. All object keys MUST be double-quoted strings.
+- No single-quoted strings. All strings MUST use double quotes.
+- No hex, octal, or other non-decimal numeric literals.
+- No `NaN`, `Infinity`, or `-Infinity`. These are not valid JSON values.
+
+Implementations MUST reject payloads that violate these rules. JSON parsers like nlohmann/json default to strict mode; do not enable lenient parsing modes.
+
+#### Character encoding
+Payloads MUST be valid UTF-8. Any payload containing invalid UTF-8 byte sequences MUST be rejected and the connection closed.
+
+JSON strings MAY contain any Unicode codepoint, including non-ASCII characters (ex: scene names with emoji, Cyrillic, Chinese characters, etc.) Recievers MUST handle the full Unicode range.
+
+#### Numeric types
+JSON does not distinguish between integers and floating-point numbers at the syntactic level. Both are written as decimal numbers. ICP imposes the following type rules at the application layer.
+
+- Fields documented as **integer** MUST contain whole numbers within the range of a 64-bit signed integer. Receivers MUST reject non-integer values.
+- Fields documented as **boolean** MUST contain `true` or `false`. The strings `"true"`, `"false"`, the integers `0` or `1`, and `null` are not acceptable substitutes.
+- Fields documented as string MUST contain JSON strings. Number, booleans, and null are not acceptable substitutes.
+
+ICP does not use floating-point numbers anywhere in the protocol. Any field that might naively be expressed as a float (bitrates, latency, durations) is expressed as an integer in a fixed unit (kbps, milliseconds, seconds).
+
+#### Key naming convention
+Object keys use `snake_case`, all lowercase, ASCII letters and underscores only. Examples: `op`, `scene_name`, `current_bitrate_kbps`.
+
+Keys MUST NOT contain hyphens, dots, spaces, or non-ASCII characters. This convention is enforced for consistency between client and server implementations and to avoid quoting hazards in different languages.
+
+#### Field ordering
+Implementations MUST NOT depend on the order of keys within JSON objects. JSON does not specify a canonical key order, and serializers may emit keys in any order. Parsers must accept keys in any order.
+
+#### Unknown Fields
+Receivers MUST ignore unknown fields in messages they otherwise understand. This rule allows the protocol to be extended in backward-compatible ways: e.g. a v1.1 server can include new fields in responses to v1.0 clients without breaking them.
+
+The exception is the top-level `op` field in requests: an unknown `op` value MUST be rejected with an error response (see S7)
 
 ## 5. Handshake
 
