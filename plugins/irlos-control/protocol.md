@@ -148,6 +148,104 @@ The exception is the top-level `op` field in requests: an unknown `op` value MUS
 
 ## 5. Handshake
 
+When a client connects to the plugin's sockets, the two endpoints perform a handshake before any other messages are exchanged. The handshake establishes protocol version compatibility and confirms exclusive client access.
+
+#### Sequence
+The handshake consists of two messages:
+
+1. The client sends a `hello` request immediately after the TCP-level connection is established.
+2. The plugin sends a `hello` response (success or failure).
+
+No other messages are valid until the handshake completes. The plugin MUST NOT process any other request from a client that has not completed a successful handshake. The client MUST NOT send any other request until it has received a successful handshake response.
+
+**Client `hello` request**
+```
+{
+  "op": "hello",
+  "protocol_version": 1.
+}
+```
+
+Fields:
+
+- `op` (string, required) - MUST be the literal string `"hello"`.
+- `protocol_version` (integer, require) - the major version of ICP the client implements. v1 of this specification uses `1`
+
+**Plugin `hello` response (success)**
+```
+{
+  "ok": true,
+  "result": {
+    "protocol_version": 1,
+    "plugin_version": "0.1.0",
+    "irlosstudio_version": "0.1.0"
+  }
+}
+```
+
+Fields:
+
+- `ok` (boolean, required) - `true` for successful handshake.
+- `result.protocol_version` (integer, required) - The major version of ICP the plugin implements.
+- `result.plugin_version` (string, required) - the version of the `irlos-control` plugin itself, as a semver string.
+- `result.irlosstudio_version` (string, required) - the version of IrlosStudio the plugin is loaded into.
+
+**Plugin `hello` response (failure)**
+```
+{
+  "ok": false,
+  "error": {
+    "code": "version_mismatch",
+    "message": "Client protocol version 2 not supported; this plugin implements version 1."
+  }
+}
+```
+
+Or
+```
+{
+  "ok": false,
+  "error": {
+    "code": "client_already_attached",
+    "message": "Another client is currently connected."
+  }
+}
+```
+
+After sending a failure response, the plugin MUST close the connection.
+
+#### Defined error codes for the handshake
+- `version_mismatch` - the client's `protocol_version` is not supported by the plugin.
+- `client_already_attached` - another client holds the active connection.
+- `malformed_hello` - the `hello` request was missing required fields, had wrong types, or was not a `hello` op.
+
+#### Version compatibility
+ICP uses major-version numbers only. A plugin implementing protocol version `N` MUST accept only clients reporting `protocol_version: N`. There is no minor-version negotiation.
+
+This is a deliberate simplification. Within a major version, the protocol is extended only by:
+
+- Adding new optional fields to existing requests or responses
+- Adding new operations
+- Adding new fields to error responses
+
+These changes are backward-compatible by the rules in S4 (unknown fields ignored, unknown operations rejected). Any change that would break an older implementation requires bumping the major version.
+
+#### Behavior on handshake failure
+If the client sends a request other than `hello` as its first message, the plugin MUST respond with a `malformed_hello` error and close the connection.
+
+If the client sends a `hello` with an unsupported version, the plugin MUST respond with `version_mismatch` and close the connection.
+
+If a second client connects while the plugin already has an active session, the plugin MUST accept the connection (so it can send a structured error), respond to the second client's `hello` with `client_already_attached`, and close the second connection. The original client's session is unaffected.
+
+#### Why the handshake exists
+The handshake serves three purposes:
+
+1. Version negotiation - Client and plugin agree on protocol version before exchanging any state-changing messages. This catches mismatches at connection time rather than partway through a session when a message is misparsed.
+
+2. Concurrent client rejection - The single-client invariant from S2 is enforced here. The second client gets a structured, debuggable error instead of mysteriously failing.
+
+3. Implementation diagnostics - The plugin's response includes plugin version and IrlosStudio version, which the client can log. When debugging, knowing exactly which versions are in play matters.
+
 
 
 ## 6. Request/Response model
