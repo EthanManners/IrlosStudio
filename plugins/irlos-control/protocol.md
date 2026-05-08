@@ -250,8 +250,76 @@ The handshake serves three purposes:
 
 ## 6. Request/Response model
 
-Synchronous, one at a time response format
+After a successful handshake, the connection enters the request/response phase. All subsequent communication on the connection follows a strict request/response pattern.
 
+#### Strict synchronous exchange
+For each request the client sends, the plugin sends exactly one response. The client MUST NOT send a second request until the response to the first request has been received. The plugin MUST NOT process a second request until the response to the first has been written to the socket.
+
+This rule aplies to the connection as a whole, not per-operation. There are no parallel requests, no streaming responses, no out of order responses.
+
+#### Request shape
+Every request is a JSON object with at least these fields:
+```
+{
+  "op": "<operation_name>",
+  ...
+}
+```
+
+- `op` (string, required) - the operation name. MUST be one of the defined operations in S8 (or `hello`, defined in S5)
+
+Additional fields are operation-specific and defined per-operation in S8
+
+#### Response shape
+Every response is a JSON object with one of two shapes.
+
+**Success response:**
+```
+{
+  "ok": true,
+  "result": { ... }
+}
+```
+
+- `ok` (boolean, required) - `true` for success.
+- `result` (object, required) - operation-specific result data. The shape of `result` is defined per-operation in S8. For operations that return no meaningful data, `result` is the empty object `{}`. Even when empty, the `result` field MUST be present.
+
+**Error response:**
+```
+{
+  "ok": false,
+  "error": {
+    "code": "<error_code>",
+    "message": "<human-readable description>"
+  }
+}
+```
+
+- `ok` (boolean, required) - `false` for error.
+- `error.code` (string, required) - a snake_case error identifier from the defined set (see S7)
+- `error.message` (string, required) - human-readable English description of the error.
+
+A response MUST contain exactly one of `result` or `error`, never both, never neither.
+
+#### Request-response pairing
+ICP does not use request IDs. Pairing of requests to responses is by position: response `N` on a connection corresponds to request `N`.
+
+This is sufficient because requests are strictly serialized. The client knows which request it just sent; the next response it receives is the response to that request.
+
+#### Operation determinism
+For a given plugin state, an operation MUST behave deterministically: the same request, sent twice in succession, MUST produce responses that differ only in fields documented as time-varying or state-dependent. Operations MUST NOT have hidden side effects beyond those documented in S8.
+
+This rule is for implementer discipline. It rules out a category of "spooky" bugs where an operation works the first time and fails the second time for reasons not visible to the caller.
+
+#### Connection state
+The connection itself maintains minimal state:
+
+- Whether the handshake has completed (after a successful `hello` exchange)
+- Nothing else
+
+Operations do not establish per-operation state on the connection. Each request is a complete description of what the client wants; each response is a complete description of what happened.
+
+This is a deliberate simplicity choice. ICP is not session-stateful in the way HTTP cookies or SSH channels are. The plugin's state is OBS (IrlosStudio) state (which scene is current, whether streaming is active, etc.), and that state is queried or modified by individual operations. The connection itself is just a transport.
 
 ## 7. Error format
 
