@@ -323,19 +323,181 @@ This is a deliberate simplicity choice. ICP is not session-stateful in the way H
 
 ## 7. Error format
 
+All error responses across all operations follow a single envelope shape and draw error codes from a defined registry.
+
+#### Error envelope
+```
+{
+  "ok": false,
+  "error": {
+    "code": "<error_code>",
+    "message": "<human-readable description",
+    "details": { ... }
+  }
+}
+```
+
+**Fields:**
+
+- `code` (string, required) - a snake_case error identifier from the registry below or from the per-operation error codes defined in S8.
+- `message` (string, required) - human-readable English description suitable for log files and operator-facing error displays. The message is informational; cliets MUST NOT branch on its content.
+- `details` (object, optional) - operation-specific structured data about the error. May contain fields like the requested scene name, the actual current state, etc. The shape is defined per-error-code where it applies.
+
+When `details` is omitted, it's because the error has no useful structured payload beyond the code and message.
+
+#### Standard error codes
+These error codes apply across all operations. Per operation codes are defined in S8 alongside their operations.
+
+- `malformed_request` - the request was not a valid JSON object, or was missing required fields, or had fields with wrong types. The plugin closes the connection after sending this error.
+- `unknown_operation` - the request's `op` field was not one of the defined operations. The connection remains open; the client can send a different request.
+- `not_handshaked` - the client sent a non-`hello` request before completing the handshake. The plugin closes the connection.
+- `internal_error` - the plugin encountered an unexpected error processing the request (e.g. an OBS API call returned an unhandled error code, an out-of-memory condition, etc.). The connection remains open; the operator should investigate via plugin logs.
+- `obs_unavailable` - the plugin received a request that requires interaction with OBS (e.g. scene switch, streaming control), but OBS is in a state where the operation cannot be performed (loading, shutting down, scene collection switching). The connection remains open; the client can retry.
+
+#### Connection-closing vs connection-preserving errors
+The error response field itself does not encode whether the plugin will close the connection. That behavior is determined by the error code:
+
+- **Closing errors:** `malformed_request`, `not_handshaked`, framing/encoding violations from S3-S4 (which do not even produce a response, the connection is closed silently).
+- **Preserving errors:** `unknown_operation`, `internal_error`, `obs_unavailable`, and most per-operation errors.
+
+The general rule: the connection is closed when the client has demonstrated it doesn't speak the protocol correctly. The connection is preserved when the request was protocol-valid but the _operation_ failed for a domain reason.
+
+Per-operation errors in S8 will note explicitly when they are connection-closing.
+
+#### Error code naming
+Error codes follow these conventions:
+
+- Lowercase snake_case
+- Descriptive, not generic (`scene_not_found` rather than `not_found`)
+- Stable across versions - once an error code is published in a release, it MUST NOT be removed or have its meaning changed in subsequent releases. New error codes can be added.
+
+This stability rule lets clients write code that branches on specific error codes:
+```
+if (response.error.code == "scene_not_found") {
+    // recover by listing available scenes and asking the operator
+}
+```
+
+If error codes were renamed between versions, this kind of code would break silently. Stability of the error registry is a backward-compatibility commitment.
+
+#### Localization
+Error `message` fields are English-only. Localization is not a part of v1.
+
+If localization becomes a requirement (non v1), the right design is for clients to localize based on the `code` field. They have a translation table from codes to localized strings. The plugin shouldn't be in the localization business.
 
 
 ## 8. Operations
 
-1. Switch to a named scene
-2. Get current scene
-3. Get list of scenes (for validation at startup)
-4. Start streaming
-5. Stop streaming
-6. Get streaming state
-7. Start recording
-8. Stop recording
+This section defines each operation in detail. Every operation follows the same template:
 
+- **Description.** What the operation does, at a level a reviewer can verify against the implementation.
+- **Request schema.** The required and optional fields in the request, with types and constraints.
+- **Response schema (success).** The shape of the `result` object on success.
+- **Error codes.** The per-operation error codes that may be returned, in addition to the standard codes from S7.
+- **Example.** A wire-level request and response.
+- **Notes.** Implementation gotchas, behavior under edge conditions.
+
+#### 8.1 switch_scene
+##### **Description.**
+
+Switches OBS's active scene to the named scene. The change takes effect immediately; the new scene becomes the current scene for both rendering and any active streaming/recording outputs.
+If the requested scene is already the current scene, the operation succeeds without making changes.
+
+##### **Request schema.**
+```
+{
+  "op": "switch_scene",
+  "scene": "<scene_name>"
+}
+```
+
+**Fields:**
+
+- `op` (string, required) - MUST be "switch_scene"
+- `scene` (string, required) - the name of the target scene. Maximum length 256 bytes (UTF-8). MUST NOT be empty.
+
+##### **Response schema (success).**
+```
+{
+  "ok": true,
+  "result": {
+    "previous_scene": "<previous_scene_name>",
+    "current_scene": "<current_scene_name>"
+  }
+}
+```
+
+**Fields:**
+
+- `previous_scene` (string, required) - the name of the scene that was active immediately before this call. Empty string if OBS had no scene loaded.
+- `current_scene` (string, required) - the name of the scene that is now active. Equals the requested scene on success.
+
+##### **Per-operation error codes.**
+
+- `scene_not_found` - the requested scene name does not exist in OBS's current scene collection.
+  - `details.requested` (string) - the scene name from the request.
+  - `details.available` (array of strings) - the list of scene names that do exist, suitable for client side suggestions or operator display.
+  - Connection: preserved.
+- `scene_name_too_long` - the requested scene name exceeds 256 bytes.
+  - Connection: preserved.
+
+Standard error codes from S7 also apply (`malformed_request`, `obs_unavailable`, `internal_error`).
+
+##### **Example
+
+###### Success
+**Request:**
+`{"op": "switch_scene", "scene": "Live"}`
+
+**Response:**
+```
+{
+  "ok": true,
+  "result": {
+    "previous_scene": "Offline",
+    "current_scene": "Live"
+  }
+}
+```
+
+###### Scene not found.
+**Request:**
+`{"op": "switch_scene", "scene": "Tive"}`
+
+**Response:**
+```
+{
+  "ok": false,
+  "error": {
+    "code": "scene_not_found",
+    "message": "No scene named 'Tive' exists.",
+    "details": {
+      "requested": "Tive",
+      "available": ["Live", "BRB", "Offline", "Starting"]
+    }
+  }
+}
+```
+
+##### Notes.
+
+- The operation is idempotent. Switching to the current scene is a no-op that returns success with `previous_scene == current_scene`. irlosd's switcher relies on this. It sends `switch_scene` requests based on bitrate state without checking first whether the scene is already current.
+- Scene name matching is case-sensitive and exact. "Live" and "live" are different scenes. There is no fuzzy matching, no whitespace normalization, no Unicode normalization. The plugin matches against OBS's internal scene list byte-for-byte.
+- The operation does not validate that the target scene is functional (sources are loaded, no errors in scene setup). It only verifies the scene exists by name. If a scene is broken in some OBS-internal way, the switch may succeed at the protocol level but result in a black frame or missing sources. This is consistent with how OBS's frontend itself behaves.
+- During an OBS scene collection switch (the operator changes scene collections via the OBS GUI), the available scene list changes. A `switch_scene` request issued during this transition may return `obs_unavailable` if OBS is mid-transition, or `scene_not_found` if the scene existed in the old collection but not the new one. Clients should retry on `obs_unavailable`; on `scene_not_found`, re-fetch the scene list via `list_scenes` and reconcile.
+
+
+
+1. switch_scene
+2. get_current_scene
+3. list_scenes
+4. start_streaming
+5. stop_streaming
+6. get_streaming_state
+7. start_recording
+8. stop_recording
+9. get_recording_state
+10. get_stats
 
 
 ## 9. Conection lifecycle
